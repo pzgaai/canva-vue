@@ -82,14 +82,14 @@ const hasSelection = computed(() => selectedIds.value.length > 0)
 // ============ 单选操作 ============
 
 const add = () => {
-  elementsStore.addElement({
-    type: 'shape',
+  const id = elementsStore.addShape({
     x: 20 + Math.floor(Math.random() * 200),
     y: 20 + Math.floor(Math.random() * 120),
     width: 120,
     height: 80,
-    fill: `hsl(${Math.random() * 360}, 70%, 60%)`,
+    fillColor: `hsl(${Math.random() * 360}, 70%, 60%)`,
   })
+  if (id) selectionStore.selectElement(id)
 }
 
 const removeLast = () => {
@@ -109,7 +109,8 @@ const clearSelection = () => {
 }
 
 const deleteSelected = () => {
-  elementsStore.removeElements(selectedIds.value)
+  // 逐个删除选中的元素
+  selectedIds.value.forEach(id => elementsStore.removeElement(id))
   selectionStore.clearSelection()
 }
 
@@ -122,15 +123,36 @@ const moveSelectedBy = (dx: number, dy: number) => {
 }
 
 const scaleSelectedBy = (sx: number, sy: number) => {
-  elementsStore.scaleElements(selectedIds.value, sx, sy)
+  elementsStore.$patch((state) => {
+    state.elements = state.elements.map((el) =>
+      selectedIds.value.includes(el.id)
+        ? { ...el, width: el.width * sx, height: el.height * sy }
+        : el
+    )
+  })
+  elementsStore.saveToLocal()
 }
 
 const rotateSelectedBy = (angle: number) => {
-  elementsStore.rotateElements(selectedIds.value, angle)
+  elementsStore.$patch((state) => {
+    state.elements = state.elements.map((el) =>
+      selectedIds.value.includes(el.id)
+        ? { ...el, rotation: ((el.rotation || 0) + angle) % 360 }
+        : el
+    )
+  })
+  elementsStore.saveToLocal()
 }
 
 const updateSelectedFill = (fill: string) => {
-  elementsStore.updateElements(selectedIds.value, { fill })
+  elementsStore.$patch((state) => {
+    state.elements = state.elements.map((el) =>
+      selectedIds.value.includes(el.id)
+        ? { ...el, fill, fillColor: fill }
+        : el
+    )
+  })
+  elementsStore.saveToLocal()
 }
 
 // ============ 选择与拖拽 ============
@@ -223,7 +245,7 @@ const elStyle = (el: Element) => ({
   top: `${el.y}px`,
   width: `${el.width}px`,
   height: `${el.height}px`,
-  background: el.fill || '#fff',
+  background: el.fill || el.fillColor || '#fff',
   transform: `rotate(${el.rotation || 0}deg)`,
 })
 </script>
@@ -233,6 +255,9 @@ const elStyle = (el: Element) => ({
   padding: 20px;
   font-family: sans-serif;
   max-width: 1200px;
+  margin: 0 auto;
+  max-height: 100vh;
+  overflow-y: auto;
 }
 
 .controls {
@@ -282,7 +307,7 @@ button:disabled {
   position: relative;
   background: #fafafa;
   margin-bottom: 12px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .preview-el {
