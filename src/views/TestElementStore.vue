@@ -15,6 +15,9 @@
         删除选中 ({{ selectedIds.length }})
       </button>
 
+      <button @click="undo" :disabled="!canUndo" style="background: #e8f5e9; margin-left: 12px;">↶ 撤销</button>
+      <button @click="redo" :disabled="!canRedo" style="background: #e8f5e9;">↷ 重做</button>
+
       <hr />
 
       <div v-if="hasSelection" class="batch-controls">
@@ -55,6 +58,20 @@
     </div>
 
     <h3>当前选中: {{ selectedIds.join(', ') || '无' }}</h3>
+
+    <div style="background: #f5f5f5; padding: 12px; border-radius: 4px; margin: 12px 0;">
+      <h4 style="margin-top: 0;">📋 历史栈信息</h4>
+      <p style="margin: 4px 0; font-size: 12px;">
+        <strong>栈大小:</strong> {{ historyStore.stack.length }} | 
+        <strong>当前指针:</strong> {{ historyStore.index }} | 
+        <strong>元素数量:</strong> {{ elements.length }}
+      </p>
+      <p style="margin: 4px 0; font-size: 12px;">
+        <strong>撤销:</strong> {{ canUndo ? '可用' : '不可用' }} | 
+        <strong>重做:</strong> {{ canRedo ? '可用' : '不可用' }}
+      </p>
+    </div>
+
     <h3>元素列表</h3>
     <pre>{{ elements }}</pre>
   </div>
@@ -65,10 +82,12 @@ import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useElementsStore } from '@/stores/elements'
 import { useSelectionStore } from '@/stores/selection'
+import { useHistoryStore } from '@/stores/history'
 import type { Element } from '@/cores/types/element'
 
 const elementsStore = useElementsStore()
 const selectionStore = useSelectionStore()
+const historyStore = useHistoryStore()
 
 onMounted(() => {
   elementsStore.loadFromLocal()
@@ -78,18 +97,20 @@ const { elements } = storeToRefs(elementsStore)
 const { selectedIds } = storeToRefs(selectionStore)
 
 const hasSelection = computed(() => selectedIds.value.length > 0)
+const canUndo = computed(() => historyStore.index > 0)
+const canRedo = computed(() => historyStore.index < historyStore.stack.length - 1)
 
 // ============ 单选操作 ============
 
 const add = () => {
-  elementsStore.addElement({
-    type: 'shape',
+  const id = elementsStore.addShape({
     x: 20 + Math.floor(Math.random() * 200),
     y: 20 + Math.floor(Math.random() * 120),
     width: 120,
     height: 80,
-    fill: `hsl(${Math.random() * 360}, 70%, 60%)`,
+    fillColor: `hsl(${Math.random() * 360}, 70%, 60%)`,
   })
+  if (id) selectionStore.selectElement(id)
 }
 
 const removeLast = () => {
@@ -109,6 +130,8 @@ const clearSelection = () => {
 }
 
 const deleteSelected = () => {
+  // 使用批量删除接口，一次记录历史快照
+  if (!hasSelection.value) return
   elementsStore.removeElements(selectedIds.value)
   selectionStore.clearSelection()
 }
@@ -122,15 +145,39 @@ const moveSelectedBy = (dx: number, dy: number) => {
 }
 
 const scaleSelectedBy = (sx: number, sy: number) => {
-  elementsStore.scaleElements(selectedIds.value, sx, sy)
+  elementsStore.recordSnapshot()
+  elementsStore.$patch((state) => {
+    state.elements = state.elements.map((el) =>
+      selectedIds.value.includes(el.id)
+        ? { ...el, width: el.width * sx, height: el.height * sy }
+        : el
+    )
+  })
+  elementsStore.saveToLocal()
 }
 
 const rotateSelectedBy = (angle: number) => {
-  elementsStore.rotateElements(selectedIds.value, angle)
+  elementsStore.recordSnapshot()
+  elementsStore.$patch((state) => {
+    state.elements = state.elements.map((el) =>
+      selectedIds.value.includes(el.id)
+        ? { ...el, rotation: ((el.rotation || 0) + angle) % 360 }
+        : el
+    )
+  })
+  elementsStore.saveToLocal()
 }
 
 const updateSelectedFill = (fill: string) => {
-  elementsStore.updateElements(selectedIds.value, { fill })
+  elementsStore.recordSnapshot()
+  elementsStore.$patch((state) => {
+    state.elements = state.elements.map((el) =>
+      selectedIds.value.includes(el.id)
+        ? { ...el, fill, fillColor: fill }
+        : el
+    )
+  })
+  elementsStore.saveToLocal()
 }
 
 // ============ 选择与拖拽 ============
@@ -178,6 +225,8 @@ function onElementMouseDown(el: Element, event: MouseEvent) {
     startX: event.clientX,
     startY: event.clientY,
   }
+  // 开始一个批处理，合并拖拽过程中的历史记录
+  elementsStore.beginBatch()
 }
 
 function onPointerMove(e: MouseEvent) {
@@ -202,6 +251,8 @@ function onPointerMove(e: MouseEvent) {
 
 function onPointerUp() {
   dragging.value = null
+  // 结束批处理，提交一次历史快照
+  elementsStore.endBatch()
   // 延迟重置 isDragging，避免 mouseup 后的 click 事件被拦截
   setTimeout(() => {
     isDragging.value = false
@@ -223,9 +274,18 @@ const elStyle = (el: Element) => ({
   top: `${el.y}px`,
   width: `${el.width}px`,
   height: `${el.height}px`,
-  background: el.fill || '#fff',
+  background: el.fill || el.fillColor || '#fff',
   transform: `rotate(${el.rotation || 0}deg)`,
 })
+
+// ============ 撤销/重做 ============
+const undo = () => {
+  elementsStore.undo()
+}
+
+const redo = () => {
+  elementsStore.redo()
+}
 </script>
 
 <style scoped>
@@ -233,6 +293,9 @@ const elStyle = (el: Element) => ({
   padding: 20px;
   font-family: sans-serif;
   max-width: 1200px;
+  margin: 0 auto;
+  max-height: 100vh;
+  overflow-y: auto;
 }
 
 .controls {
@@ -282,7 +345,7 @@ button:disabled {
   position: relative;
   background: #fafafa;
   margin-bottom: 12px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .preview-el {
