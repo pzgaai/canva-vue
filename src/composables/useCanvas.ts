@@ -150,6 +150,28 @@ export function useCanvas() {
             })
             console.log('创建三角形元素:', id)
             canvasStore.setTool('select')
+        } else if (currentTool === 'text') {
+            // 创建文本元素
+            const id = elementsStore.addText({
+                x: mouseX,
+                y: mouseY,
+                width: 150, // 最小宽度，与 TextEditor 的 minWidth 一致
+                height: 50, // 最小高度，与 TextEditor 的 minHeight 一致
+                content: '双击编辑文本',
+                fontSize: 16,
+                fontFamily: 'Arial',
+                color: '#000000',
+                rotation: 0,
+                opacity: 1,
+                visible: true,
+                locked: false,
+                zIndex: elementsStore.elements.length
+            })
+            console.log('创建文本元素:', id)
+            canvasStore.setTool('select')
+            
+            // 返回文本元素 ID，以便立即进入编辑模式
+            return id
         }
     }
 
@@ -163,6 +185,7 @@ export function useCanvas() {
 
   return {
     container,
-    canvasService
+    canvasService,
+    createElement
   }
 }
