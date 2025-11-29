@@ -7,7 +7,6 @@ import { useHistoryStore } from '@/stores/history'
  * 服务对象：为Composables层提供历史操作支持
  */
 export class HistoryService {
-  // lazy access to the pinia store to avoid calling useHistoryStore() at module load time
   private get store() {
     return useHistoryStore()
   }
@@ -48,32 +47,22 @@ export class HistoryService {
     return result
   }
 
-  getCurrent(): AnyElement[] | null {
+  getCurrent() {
     return this.store.getCurrent()
-  }
-
-  canUndo(): boolean {
-    return this.store.index > 0
-  }
-
-  canRedo(): boolean {
-    return this.store.index < this.store.stack.length - 1
   }
 
   clear() {
     this.store.clear()
   }
 
-  // Expose reactive store properties for consumers
-  get stack(): AnyElement[][] {
-    return this.store.stack
+  canUndo() {
+    return this.store.index > 0
   }
 
-  get index(): number {
-    return this.store.index
+  canRedo() {
+    return this.store.index < this.store.stack.length - 1
   }
 }
 
-// singleton instance
 export const historyService = new HistoryService()
 export default historyService
