@@ -200,9 +200,22 @@ const onDrag = (event: MouseEvent) => {
       boxRef.style.transform = `translate3d(${newX}px, ${newY}px, 0)`
     }
 
-    // 同步更新 Canvas 元素位置（直接操作 Graphics，不触发完整渲染）
-    if (canvasService && selectedIds.value.length > 0) {
-      syncDragPosition(selectedIds.value, totalOffset.value.x, totalOffset.value.y)
+    // 同步更新元素位置
+    if (selectedIds.value.length > 0) {
+      selectedIds.value.forEach(id => {
+        const el = elementsStore.getElementById(id)
+        if (el?.type === 'image') {
+          // Update DOM image element
+          const imgEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
+          if (imgEl) {
+            imgEl.style.transform = `translate3d(${el.x + totalOffset.value.x}px, ${el.y + totalOffset.value.y}px, 0)`
+          }
+        }
+      })
+      // Update PIXI Graphics
+      if (canvasService) {
+        syncDragPosition(selectedIds.value, totalOffset.value.x, totalOffset.value.y)
+      }
     }
 
     animationFrameId = null
@@ -229,6 +242,19 @@ const stopDrag = () => {
   if ((Math.abs(totalOffset.value.x) > 1 || Math.abs(totalOffset.value.y) > 1) && selectedIds.value.length > 0) {
     elementsStore.moveElements(selectedIds.value, totalOffset.value.x, totalOffset.value.y)
     elementsStore.saveToLocal()
+
+    // Reset DOM image transforms after store update
+    requestAnimationFrame(() => {
+      selectedIds.value.forEach(id => {
+        const el = elementsStore.getElementById(id)
+        if (el?.type === 'image') {
+          const imgEl = document.querySelector(`img[data-element-id="${id}"]`) as HTMLElement
+          if (imgEl) {
+            imgEl.style.transform = `translate3d(${el.x}px, ${el.y}px, 0)`
+          }
+        }
+      })
+    })
 
     // 更新缓存的边界框
     cachedBoundingBox.value = calculateBoundingBox()
@@ -284,29 +310,65 @@ const onResize = (e: MouseEvent) => {
   animationFrameId = requestAnimationFrame(() => {
     const box = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
     if (box && cachedBoundingBox.value) {
-      let x = cachedBoundingBox.value.x
-      let y = cachedBoundingBox.value.y
-      if (resizeHandle.value.includes('l')) x += cachedBoundingBox.value.width - w
-      if (resizeHandle.value.includes('t')) y += cachedBoundingBox.value.height - h
+      let x, y
+      if (selectedIds.value.length > 1) {
+        // Multi-element: center the selection box
+        const centerX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
+        const centerY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
+        x = centerX - w / 2
+        y = centerY - h / 2
+      } else {
+        // Single element: anchor from corner
+        x = cachedBoundingBox.value.x
+        y = cachedBoundingBox.value.y
+        if (resizeHandle.value.includes('l')) x += cachedBoundingBox.value.width - w
+        if (resizeHandle.value.includes('t')) y += cachedBoundingBox.value.height - h
+      }
       box.style.transform = `translate3d(${x}px, ${y}px, 0)`
       box.style.width = w + 'px'
       box.style.height = h + 'px'
     }
     
     // Render cache shapes during resize
-    if (canvasService) {
+    if (canvasService && cachedBoundingBox.value) {
       const scaleX = w / resizeStart.value.w
       const scaleY = h / resizeStart.value.h
+      const centerX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
+      const centerY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
+      
       selectedIds.value.forEach(id => {
         const el = elementsStore.getElementById(id)
         if (el) {
-          let newX = el.x, newY = el.y
-          if (resizeHandle.value.includes('l')) newX += el.width * (1 - scaleX)
-          if (resizeHandle.value.includes('t')) newY += el.height * (1 - scaleY)
-          canvasService.getRenderService().updateElementPosition(id, newX, newY)
-          const graphic = canvasService.getRenderService().getGraphic(id)
-          if (graphic) {
-            graphic.scale.set(scaleX, scaleY)
+          let newX, newY
+          if (selectedIds.value.length > 1) {
+            // Multi-element: scale from center
+            const relX = el.x + el.width / 2 - centerX
+            const relY = el.y + el.height / 2 - centerY
+            newX = centerX + relX * scaleX - el.width * scaleX / 2
+            newY = centerY + relY * scaleY - el.height * scaleY / 2
+          } else {
+            // Single element: scale from corner
+            newX = el.x
+            newY = el.y
+            if (resizeHandle.value.includes('l')) newX += el.width * (1 - scaleX)
+            if (resizeHandle.value.includes('t')) newY += el.height * (1 - scaleY)
+          }
+          
+          if (el.type === 'image') {
+            // Update DOM image element
+            const imgEl = document.querySelector(`img[data-element-id="${id}"]`) as HTMLElement
+            if (imgEl) {
+              imgEl.style.transform = `translate3d(${newX}px, ${newY}px, 0)`
+              imgEl.style.width = `${el.width * scaleX}px`
+              imgEl.style.height = `${el.height * scaleY}px`
+            }
+          } else {
+            // Update PIXI Graphics
+            canvasService.getRenderService().updateElementPosition(id, newX, newY)
+            const graphic = canvasService.getRenderService().getGraphic(id)
+            if (graphic) {
+              graphic.scale.set(scaleX, scaleY)
+            }
           }
         }
       })
@@ -325,10 +387,24 @@ const stopResize = () => {
   const scaleY = parseFloat(box?.style.height || '0') / cachedBoundingBox.value.height
   
   if (Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01) {
+    const centerX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
+    const centerY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
+    
     elementsStore.updateElements(selectedIds.value, (el) => {
-      let x = el.x, y = el.y
-      if (resizeHandle.value.includes('l')) x += el.width * (1 - scaleX)
-      if (resizeHandle.value.includes('t')) y += el.height * (1 - scaleY)
+      let x, y
+      if (selectedIds.value.length > 1) {
+        // Multi-element: scale from center
+        const relX = el.x + el.width / 2 - centerX
+        const relY = el.y + el.height / 2 - centerY
+        x = centerX + relX * scaleX - el.width * scaleX / 2
+        y = centerY + relY * scaleY - el.height * scaleY / 2
+      } else {
+        // Single element: scale from corner
+        x = el.x
+        y = el.y
+        if (resizeHandle.value.includes('l')) x += el.width * (1 - scaleX)
+        if (resizeHandle.value.includes('t')) y += el.height * (1 - scaleY)
+      }
       el.x = x
       el.y = y
       el.width = el.width * scaleX
@@ -336,13 +412,15 @@ const stopResize = () => {
     })
     elementsStore.saveToLocal()
     cachedBoundingBox.value = calculateBoundingBox()
-  }
-  
-  // Reset graphics scale
-  if (canvasService) {
-    selectedIds.value.forEach(id => {
-      const graphic = canvasService.getRenderService().getGraphic(id)
-      if (graphic) graphic.scale.set(1, 1)
+    
+    // Reset graphics scale after store update
+    requestAnimationFrame(() => {
+      if (canvasService) {
+        selectedIds.value.forEach(id => {
+          const graphic = canvasService.getRenderService().getGraphic(id)
+          if (graphic) graphic.scale.set(1, 1)
+        })
+      }
     })
   }
   
