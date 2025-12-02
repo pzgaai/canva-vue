@@ -56,6 +56,7 @@ import { useDragSync } from '@/composables/useDragSync'
 import { useDragState } from '@/composables/useDragState'
 import { CoordinateTransform } from '@/cores/viewport/CoordinateTransform'
 import type { CanvasService } from '@/services/canvas/CanvasService'
+import { useAlignment } from '@/composables/useAlignment'
 
 const selectionStore = useSelectionStore()
 const elementsStore = useElementsStore()
@@ -65,6 +66,7 @@ const canvasStore = useCanvasStore()
 const canvasService = inject<CanvasService>('canvasService')
 const { syncDragPosition } = canvasService ? useDragSync(canvasService) : { syncDragPosition: () => {} }
 const { getDragState, startDrag: startGlobalDrag, updateDragOffset: updateGlobalDragOffset, endDrag: endGlobalDrag } = useDragState()
+const { checkAlignment, clearAlignment } = useAlignment()
 
 const selectedIds = computed(() => selectionStore.selectedIds)
 const isDragging = ref(false)
@@ -228,7 +230,24 @@ const onDrag = (event: MouseEvent) => {
   const worldDx = screenDx / viewport.zoom
   const worldDy = screenDy / viewport.zoom
 
-  totalOffset.value = { x: worldDx, y: worldDy }
+  // 应用对齐吸附
+  let finalDx = worldDx
+  let finalDy = worldDy
+
+  if (cachedBoundingBox.value) {
+    const targetRect = {
+      x: cachedBoundingBox.value.x + worldDx,
+      y: cachedBoundingBox.value.y + worldDy,
+      width: cachedBoundingBox.value.width,
+      height: cachedBoundingBox.value.height
+    }
+    
+    const { dx: snapDx, dy: snapDy } = checkAlignment(targetRect, selectedIds.value)
+    finalDx += snapDx
+    finalDy += snapDy
+  }
+
+  totalOffset.value = { x: finalDx, y: finalDy }
 
   // 立即更新全局拖拽偏移（世界坐标）
   updateGlobalDragOffset({ x: worldDx, y: worldDy })
@@ -354,6 +373,7 @@ const stopDrag = () => {
 
   // 结束全局拖拽状态
   endGlobalDrag()
+  clearAlignment()
 
   // 移除全局事件监听
   document.removeEventListener('mousemove', onDrag)

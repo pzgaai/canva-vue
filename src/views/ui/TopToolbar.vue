@@ -168,6 +168,25 @@
 
     <div class="divider"></div>
 
+    <!-- 对齐吸附开关 -->
+    <div class="toolbar-group">
+      <button
+        class="tool-btn"
+        :class="{ active: isSnapEnabled }"
+        @click="toggleSnap"
+        :title="isSnapEnabled ? '关闭对齐吸附' : '开启对齐吸附'"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <!-- 磁铁图标 -->
+          <path d="M4 13v6a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-6"></path>
+          <path d="M14 13v6a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-6"></path>
+          <path d="M4 5v4a8 8 0 0 0 16 0V5"></path>
+          <line x1="4" y1="5" x2="10" y2="5"></line>
+          <line x1="14" y1="5" x2="20" y2="5"></line>
+        </svg>
+      </button>
+    </div>
+
     </div>
   </div>
 </template>
@@ -176,16 +195,28 @@
 import { computed, ref, inject } from 'vue'
 import { Message } from '@arco-design/web-vue'
 import { useCanvasStore, type ToolType } from '@/stores/canvas'
+import { useGuidelinesStore } from '@/stores/guidelines'
 import { historyService } from '@/services'
 import { useElementsStore } from '@/stores/elements'
 import { useSelectionStore } from '@/stores/selection'
 import type { CanvasService } from '@/services/canvas/CanvasService'
 
 const canvasStore = useCanvasStore()
+const guidelinesStore = useGuidelinesStore()
 const currentTool = computed(() => canvasStore.currentTool)
 const fileInput = ref<HTMLInputElement | null>(null)
 const elementsStore = useElementsStore()
 const selectionStore = useSelectionStore()
+
+// 对齐吸附开关
+const isSnapEnabled = computed(() => guidelinesStore.isSnapEnabled)
+const toggleSnap = () => {
+  guidelinesStore.toggleSnap()
+  Message.info({
+    content: guidelinesStore.isSnapEnabled ? '已启用对齐吸附' : '已关闭对齐吸附',
+    duration: 1500
+  })
+}
 
 // 注入 canvasService
 const canvasService = inject<CanvasService>('canvasService')
