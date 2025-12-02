@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { AnyElement,ShapeElement,ImageElement,TextElement,GroupElement } from '@/cores/types/element'
+import type { AnyElement, ShapeElement, ImageElement, TextElement, GroupElement } from '@/cores/types/element'
 import { LocalStorage } from './persistence/LocalStorage'
 import { useHistoryStore } from './history'
 import { useSelectionStore } from './selection'
@@ -16,7 +16,7 @@ export const useElementsStore = defineStore('elements', {
   getters: {
     /**获取所有非组合元素**/
     getAllSingleElements: (state) => {
-      return state.elements.filter((el) => !el.parentGroup )
+      return state.elements.filter((el) => !el.parentGroup)
     },
     getElementById: (state) => (id: string) =>
       state.elements.find((el) => el.id === id),
@@ -55,7 +55,7 @@ export const useElementsStore = defineStore('elements', {
         : `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
     },
     /** 添加元素 */
-    addShape(payload: Omit<ShapeElement, 'id'| 'type'|'createdAt'| 'updatedAt'>): string {
+    addShape(payload: Omit<ShapeElement, 'id' | 'type' | 'createdAt' | 'updatedAt'>): string {
       const id = this.generateId();
       const newElement: ShapeElement = {
         ...payload,
@@ -71,7 +71,7 @@ export const useElementsStore = defineStore('elements', {
       return id;
     },
     // 创建图像元素
-    addImage(payload: Omit<ImageElement, 'id'| 'type'|'createdAt'| 'updatedAt'>): string {
+    addImage(payload: Omit<ImageElement, 'id' | 'type' | 'createdAt' | 'updatedAt'>): string {
       const id = this.generateId();
       const newElement: ImageElement = {
         ...payload,
@@ -87,7 +87,7 @@ export const useElementsStore = defineStore('elements', {
       return id;
     },
     // 创建文本元素
-    addText(payload: Omit<TextElement, 'id'| 'type'|'createdAt'| 'updatedAt'>): string {
+    addText(payload: Omit<TextElement, 'id' | 'type' | 'createdAt' | 'updatedAt'>): string {
       const id = this.generateId();
       const newElement: TextElement = {
         ...payload,
@@ -103,7 +103,7 @@ export const useElementsStore = defineStore('elements', {
       return id;
     },
     // 创建组合元素
-    addGroup(payload: Omit<GroupElement, 'id'| 'type'|'createdAt'| 'updatedAt'>): string {
+    addGroup(payload: Omit<GroupElement, 'id' | 'type' | 'createdAt' | 'updatedAt'>): string {
       const id = this.generateId();
       const newElement: GroupElement = {
         ...payload,

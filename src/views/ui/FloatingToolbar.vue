@@ -102,9 +102,11 @@ import { useElementsStore } from '@/stores/elements'
 import { useSelectionStore } from '@/stores/selection'
 import { useDragState } from '@/composables/useDragState'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { CoordinateTransform } from '@/cores/viewport/CoordinateTransform'
 
 const selectionStore = useSelectionStore()
 const elementsStore = useElementsStore()
+const canvasStore = useCanvasStore()
 const { getDragState } = useDragState()
 
 // 监听拖拽状态
@@ -119,7 +121,7 @@ const presetColors = [
   '#4A90E2', '#7B68EE', '#9B59B6', '#2ECC71', '#1ABC9C'
 ]
 
-// 控制颜色选择器显示
+// 控制工具显示状态
 const showFillPicker = ref(false)
 const showBorderColorPicker = ref(false)
 const showBorderWidthPicker = ref(false)
@@ -139,20 +141,43 @@ const selectedElement = computed(() => {
 })
 
 // 当前工具
-const canvasStore = useCanvasStore()
 const currentTool = computed(() => canvasStore.currentTool)
 
-// 计算工具栏位置（显示在元素上方）
+// 计算工具栏位置（显示在元素上方，使用屏幕坐标）
 const toolbarStyle = computed(() => {
   if (!selectedElement.value) return {}
 
   const element = selectedElement.value
+  const viewport = canvasStore.viewport
+  const canvasWidth = canvasStore.width
+  const canvasHeight = canvasStore.height
+  
+  // 将元素的世界坐标转换为屏幕坐标
+  const topLeft = CoordinateTransform.worldToScreen(
+    element.x,
+    element.y,
+    viewport,
+    canvasWidth,
+    canvasHeight
+  )
+  
+  const bottomRight = CoordinateTransform.worldToScreen(
+    element.x + element.width,
+    element.y + element.height,
+    viewport,
+    canvasWidth,
+    canvasHeight
+  )
+  
+  const screenWidth = bottomRight.x - topLeft.x
+  const screenCenterX = topLeft.x + screenWidth / 2
+  
   const toolbarHeight = 44
   const padding = 12
 
   return {
-    left: `${element.x + element.width / 2}px`,
-    top: `${element.y - toolbarHeight - padding}px`,
+    left: `${screenCenterX}px`,
+    top: `${topLeft.y - toolbarHeight - padding}px`,
     transform: 'translateX(-50%)'
   }
 })
@@ -178,7 +203,7 @@ const toggleBorderWidthPicker = () => {
   showBorderColorPicker.value = false
 }
 
-// 更新背景色 (预设颜色)
+// 更新背景色
 const updateFill = (color: string) => {
   if (selectedElement.value && selectedElement.value.type === 'shape') {
     elementsStore.updateShapeElementProperties(selectedElement.value.id, {
@@ -208,7 +233,7 @@ const updateBorderWidth = (width: number) => {
   showBorderWidthPicker.value = false
 }
 
-// 更新边框颜色（预设颜色）
+// 更新边框颜色
 const updateBorderColor = (color: string) => {
   if (selectedElement.value && selectedElement.value.type === 'shape') {
     elementsStore.updateShapeElementProperties(selectedElement.value.id, {

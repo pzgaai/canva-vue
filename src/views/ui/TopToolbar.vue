@@ -1,5 +1,7 @@
 <template>
   <div class="top-toolbar">
+    <div class="divider"></div>
+
     <div class="toolbar-group">
       <button
         class="tool-btn"
@@ -11,6 +13,17 @@
           <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
           <path d="M13 13l6 6"></path>
         </svg>
+      </button>
+    </div>
+
+    <div class="toolbar-group">
+      <button
+        class="tool-btn"
+        :class="{ active: currentTool === 'pan' }"
+        @click="setTool('pan')"
+        title="平移工具 (H) - 或按住空格键拖拽"
+      >
+        <svg t="1764642909767" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="3875" width="30" height="30"><path d="M869.9904 204.8c-18.7392 0-36.0448 5.4272-51.2 14.2336V153.6c0-56.4224-45.8752-102.4-102.4-102.4-21.2992 0-41.0624 6.5536-57.344 17.6128-14.0288-39.936-51.712-68.8128-96.256-68.8128-44.6464 0-82.2272 28.8768-96.256 68.7104-16.384-10.9568-36.1472-17.5104-57.344-17.5104-56.5248 0-102.4 45.9776-102.4 102.4v319.488l-69.9392-120.6272c-17.7152-30.6176-50.7904-49.664-86.3232-49.664-17.408 0-34.6112 4.5056-49.5616 13.312-47.5136 27.4432-63.8976 88.3712-36.352 135.8848l214.528 371.6096v-0.512l27.648 47.9232 15.4624 26.7264c17.6128 30.72 102.912 126.2592 172.3392 126.2592h196.1984c147.2512 0 281.6-202.6496 281.6-335.872V307.2c0-56.4224-45.9776-102.4-102.4-102.4z m51.2 483.328c0 114.9952-121.344 284.672-230.4 284.672H494.592c-38.912 0-111.616-72.2944-128-100.6592l-59.6992-103.5264-198.0416-342.2208c-13.312-23.04-5.3248-52.6336 17.6128-65.9456 7.3728-4.1984 15.5648-6.3488 23.9616-6.3488 17.3056 0 33.3824 9.216 41.984 24.064l114.2784 196.608 3.9936 6.9632c4.5056 7.3728 12.288 12.5952 21.6064 12.5952 14.2336 0 25.6-11.4688 25.6-25.6 0-0.3072-0.1024-0.4096-0.1024-0.6144h0.1024V153.8048c0-28.16 22.9376-51.2 51.2-51.2 28.16 0 51.2 23.04 51.2 51.2v281.6c0 14.1312 11.4688 25.6 25.6 25.6s25.6-11.4688 25.6-25.6V102.4c0-28.16 22.9376-51.2 51.2-51.2 28.16 0 51.2 23.04 51.2 51.2v383.5904c0 0.1024-0.1024 0.2048-0.1024 0.3072 0 14.1312 11.4688 25.6 25.6 25.6s25.6-11.4688 25.6-25.6h0.1024V153.6c0-28.16 22.9376-51.2 51.2-51.2 28.16 0 51.2 23.04 51.2 51.2v384h0.1024c0 14.1312 11.5712 25.6 25.6 25.6 14.1312 0 25.6-11.4688 25.6-25.6 0-0.3072-0.1024-0.6144-0.1024-0.9216V307.2c0-28.16 22.9376-51.2 51.2-51.2 28.16 0 51.2 23.04 51.2 51.2v380.928z" p-id="3876" fill="#2c2c2c"></path></svg>
       </button>
     </div>
 
@@ -104,26 +117,144 @@
       </button>
     </div>
 
+    <div class="divider"></div>
+
+    <!-- 缩放控件 -->
+    <div class="toolbar-group zoom-controls">
+      <button
+        class="tool-btn"
+        @click="handleZoomOut"
+        title="缩小 (Ctrl/Cmd + -)"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <path d="M21 21l-4.35-4.35"></path>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
+        </svg>
+      </button>
+      
+      <button
+        class="tool-btn zoom-display"
+        @click="handleResetZoom"
+        :title="'当前缩放: ' + zoomPercent + '% - 点击重置为100%'"
+      >
+        <span class="zoom-text">{{ zoomPercent }}%</span>
+      </button>
+      
+      <button
+        class="tool-btn"
+        @click="handleZoomIn"
+        title="放大 (Ctrl/Cmd + +)"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <path d="M21 21l-4.35-4.35"></path>
+          <line x1="11" y1="8" x2="11" y2="14"></line>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
+        </svg>
+      </button>
+      
+      <button
+        class="tool-btn"
+        @click="handleFitToView"
+        title="适应画布 (Ctrl/Cmd + 0)"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+          <path d="M9 9h6v6H9z"></path>
+        </svg>
+      </button>
+    </div>
+
+    <div class="divider"></div>
+
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, inject } from 'vue'
+import { Message } from '@arco-design/web-vue'
 import { useCanvasStore, type ToolType } from '@/stores/canvas'
 import { historyService } from '@/services'
 import { useElementsStore } from '@/stores/elements'
+import { useSelectionStore } from '@/stores/selection'
+import type { CanvasService } from '@/services/canvas/CanvasService'
 
 const canvasStore = useCanvasStore()
 const currentTool = computed(() => canvasStore.currentTool)
 const fileInput = ref<HTMLInputElement | null>(null)
+const elementsStore = useElementsStore()
+const selectionStore = useSelectionStore()
+
+// 注入 canvasService
+const canvasService = inject<CanvasService>('canvasService')
 
 // 配置常量
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml']
 const MAX_DIMENSION = 4096 // 最大宽高限制
 
-const elementsStore = useElementsStore()
+// 缩放相关
+const zoomPercent = computed(() => {
+  return Math.round(canvasStore.viewport.zoom * 100)
+})
+
+const handleZoomIn = () => {
+  if (!canvasService) return
+  const viewportService = canvasService.getViewportService()
+  const currentZoom = viewportService.getViewport().zoom
+  const config = viewportService.getConfig()
+  const newZoom = Math.min(currentZoom * 1.2, config.maxZoom)
+  viewportService.setZoom(newZoom)
+  canvasService.getRenderService().updateViewportTransform()
+  canvasStore.updateViewport(viewportService.getViewport())
+}
+
+const handleZoomOut = () => {
+  if (!canvasService) return
+  const viewportService = canvasService.getViewportService()
+  const currentZoom = viewportService.getViewport().zoom
+  const config = viewportService.getConfig()
+  const newZoom = Math.max(currentZoom / 1.2, config.minZoom)
+  viewportService.setZoom(newZoom)
+  canvasService.getRenderService().updateViewportTransform()
+  canvasStore.updateViewport(viewportService.getViewport())
+}
+
+const handleResetZoom = () => {
+  if (!canvasService) return
+  const viewportService = canvasService.getViewportService()
+  const config = viewportService.getConfig()
+  viewportService.setZoom(config.defaultZoom)
+  canvasService.getRenderService().updateViewportTransform()
+  canvasStore.updateViewport(viewportService.getViewport())
+}
+
+const handleFitToView = () => {
+  if (!canvasService) return
+  const elements = elementsStore.elements
+  if (elements.length === 0) return
+  
+  // 计算所有元素的边界
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  elements.forEach(el => {
+    minX = Math.min(minX, el.x)
+    minY = Math.min(minY, el.y)
+    maxX = Math.max(maxX, el.x + el.width)
+    maxY = Math.max(maxY, el.y + el.height)
+  })
+  
+  const viewportService = canvasService.getViewportService()
+  viewportService.fitToView({
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY
+  }, 50)
+  canvasService.getRenderService().updateViewportTransform()
+  canvasStore.updateViewport(viewportService.getViewport())
+}
 
 const canUndo = computed(() => historyService.canUndo())
 const canRedo = computed(() => historyService.canRedo())
@@ -132,9 +263,6 @@ const setTool = (tool: ToolType) => {
   canvasStore.setTool(tool)
   console.log('Tool selected:', tool)
 }
-import { useSelectionStore } from '@/stores/selection'
-
-const selectionStore = useSelectionStore()
 
 const onUndo = () => {
   const result = historyService.undo()
@@ -172,7 +300,7 @@ const handleImageUpload = () => {
   fileInput.value?.click()
 }
 
-// 压缩图片（如果需要）
+// 压缩图片
 const compressImage = (img: HTMLImageElement, maxSize: number = 2000): Promise<string> => {
   return new Promise((resolve) => {
     const canvas = document.createElement('canvas')
@@ -211,13 +339,19 @@ const handleFileChange = async (event: Event) => {
 
   // 1. 验证文件类型
   if (!ALLOWED_TYPES.includes(file.type)) {
-    alert(`不支持的图片格式！\n支持的格式：JPEG, PNG, GIF, WebP, SVG`)
+    Message.error({
+      content: '不支持的图片格式！支持的格式：JPEG, PNG, GIF, WebP, SVG',
+      duration: 3000
+    })
     return
   }
 
   // 2. 验证文件大小
   if (file.size > MAX_FILE_SIZE) {
-    alert(`图片文件过大！\n当前大小：${(file.size / 1024 / 1024).toFixed(2)}MB\n最大限制：${MAX_FILE_SIZE / 1024 / 1024}MB`)
+    Message.error({
+      content: `图片文件过大！当前大小：${(file.size / 1024 / 1024).toFixed(2)}MB，最大限制：${MAX_FILE_SIZE / 1024 / 1024}MB`,
+      duration: 3000
+    })
     return
   }
 
@@ -233,7 +367,10 @@ const handleFileChange = async (event: Event) => {
       img.onload = async () => {
         // 3. 验证图片尺寸
         if (img.width > MAX_DIMENSION || img.height > MAX_DIMENSION) {
-          alert(`图片尺寸过大！\n当前尺寸：${img.width}x${img.height}\n最大限制：${MAX_DIMENSION}x${MAX_DIMENSION}`)
+          Message.error({
+            content: `图片尺寸过大！当前尺寸：${img.width}x${img.height}，最大限制：${MAX_DIMENSION}x${MAX_DIMENSION}`,
+            duration: 3000
+          })
           return
         }
 
@@ -278,21 +415,21 @@ const handleFileChange = async (event: Event) => {
       }
 
       img.onerror = () => {
-        alert('图片加载失败，请确认文件是否损坏')
+        Message.error('图片加载失败，请确认文件是否损坏')
       }
 
       img.src = src
     }
 
     reader.onerror = () => {
-      alert('文件读取失败，请重试')
+      Message.error('文件读取失败，请重试')
     }
 
     reader.readAsDataURL(file)
 
   } catch (error) {
     console.error('图片上传错误:', error)
-    alert('图片上传失败，请重试')
+    Message.error('图片上传失败，请重试')
   }
 }
 </script>
@@ -351,5 +488,27 @@ const handleFileChange = async (event: Event) => {
 
 .tool-btn svg {
   display: block;
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.zoom-display {
+  min-width: 60px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.zoom-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #555;
+}
+
+.zoom-display:hover .zoom-text {
+  color: #0066ff;
 }
 </style>

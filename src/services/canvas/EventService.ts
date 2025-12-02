@@ -5,10 +5,12 @@
  * 1. 绑定和管理PIXI事件监听器
  * 2. 协调工具服务和元素操作
  * 3. 处理用户交互逻辑
+ * 4. 支持无限画布的坐标转换
  */
-import { Application, Graphics, FederatedPointerEvent } from 'pixi.js'
+import { Application, Graphics, FederatedPointerEvent, Container } from 'pixi.js'
 import type { AnyElement } from '@/cores/types/element'
 import { useDragState } from '@/composables/useDragState'
+import type { ViewportService } from './ViewportService'
 
 /**
  * 事件处理器接口
@@ -45,6 +47,8 @@ export class EventService {
   private dragTargetId: string | null = null
   private getElementIdByGraphic: ((graphic: Graphics) => string | undefined) | null = null
   private dragState = useDragState()
+  private viewportService: ViewportService | null = null
+  private worldContainer: Container | null = null
 
   constructor() { }
 
@@ -53,6 +57,20 @@ export class EventService {
    */
   setApp(app: Application): void {
     this.app = app
+  }
+
+  /**
+   * 设置视口服务
+   */
+  setViewportService(viewportService: ViewportService): void {
+    this.viewportService = viewportService
+  }
+
+  /**
+   * 设置世界容器
+   */
+  setWorldContainer(worldContainer: Container): void {
+    this.worldContainer = worldContainer
   }
 
   /**
@@ -67,6 +85,17 @@ export class EventService {
    */
   setElementIdGetter(getter: (graphic: Graphics) => string | undefined): void {
     this.getElementIdByGraphic = getter
+  }
+
+  /**
+   * 将屏幕坐标转换为世界坐标
+   * 如果没有视口服务，直接返回屏幕坐标（向后兼容）
+   */
+  private screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
+    if (!this.viewportService) {
+      return { x: screenX, y: screenY }
+    }
+    return this.viewportService.screenToWorld(screenX, screenY)
   }
 
   /**
@@ -86,15 +115,25 @@ export class EventService {
    * 统一处理鼠标按下事件
    */
   private handlePointerDown(event: FederatedPointerEvent): void {
+    const currentTool = this.handlers.getCurrentTool?.()
+
+    // 如果是平移工具，不处理元素交互
+    if (currentTool === 'pan') {
+      return
+    }
+
     // 现在通过 event.target 获取实际点击的对象
     const target = event.target as Graphics
     const elementId = this.getElementIdByGraphic?.(target)
+
+    // 转换屏幕坐标为世界坐标
+    const worldPos = this.screenToWorld(event.global.x, event.global.y)
 
     if (elementId) {
       // 点击到元素：开始拖拽
       this.isDragging = true
       this.dragTargetId = elementId
-      this.dragStartPos = { x: event.global.x, y: event.global.y }
+      this.dragStartPos = worldPos  // 使用世界坐标
 
       // 触发元素选中事件
       if (this.handlers.onElementSelect) {
@@ -130,30 +169,32 @@ export class EventService {
     } else {
       // 点击到画布：开始框选
       this.isBoxSelecting = true
-      this.boxStartPos = { x: event.global.x, y: event.global.y }
+      this.boxStartPos = worldPos  // 使用世界坐标
 
-      // 创建框选框
-      if (!this.selectionBox && this.app) {
+      // 创建框选框并立即添加到worldContainer
+      if (!this.selectionBox && this.worldContainer) {
         this.selectionBox = new Graphics()
-        this.app.stage.addChild(this.selectionBox)
+        this.worldContainer.addChild(this.selectionBox)
       }
     }
   }  /**
    * 统一处理鼠标移动事件 
    */
   private handlePointerMove(event: FederatedPointerEvent): void {
-    const currentPos = { x: event.global.x, y: event.global.y }
+    const worldPos = this.screenToWorld(event.global.x, event.global.y)
 
     // 处理拖拽
     if (this.isDragging && this.dragTargetId) {
-      const dx = currentPos.x - this.dragStartPos.x
-      const dy = currentPos.y - this.dragStartPos.y
+      const dx = worldPos.x - this.dragStartPos.x
+      const dy = worldPos.y - this.dragStartPos.y
 
       // 更新全局拖拽偏移
       this.dragState.updateDragOffset({ x: dx, y: dy })
 
       // 只有移动超过2像素才认为是拖拽（避免误触）
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+      // 注意：这里的阈值检查应该在世界坐标下进行
+      const threshold = 2 / (this.viewportService?.getViewport().zoom || 1)
+      if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
         const selectedIds = this.handlers.getSelectedIds?.()
         const isMultiSelect = selectedIds && selectedIds.length > 1 && selectedIds.includes(this.dragTargetId)
 
@@ -194,19 +235,16 @@ export class EventService {
 
     // 处理框选
     if (this.isBoxSelecting && this.selectionBox) {
-      const x = Math.min(this.boxStartPos.x, currentPos.x)
-      const y = Math.min(this.boxStartPos.y, currentPos.y)
-      const width = Math.abs(currentPos.x - this.boxStartPos.x)
-      const height = Math.abs(currentPos.y - this.boxStartPos.y)
+      const x = Math.min(this.boxStartPos.x, worldPos.x)
+      const y = Math.min(this.boxStartPos.y, worldPos.y)
+      const width = Math.abs(worldPos.x - this.boxStartPos.x)
+      const height = Math.abs(worldPos.y - this.boxStartPos.y)
 
-      // 只有移动超过5像素才显示框选框（避免误触）
-      if (width > 5 || height > 5) {
-        // 绘制框选框
-        this.selectionBox.clear()
-        this.selectionBox.rect(x, y, width, height)
-        this.selectionBox.stroke({ width: 2, color: 0x4A90E2 })
-        this.selectionBox.fill({ color: 0x4A90E2, alpha: 0.1 })
-      }
+      // 绘制框选框（在世界坐标系中）
+      this.selectionBox.clear()
+      this.selectionBox.rect(x, y, width, height)
+      this.selectionBox.stroke({ width: 2 / (this.viewportService?.getViewport().zoom || 1), color: 0x4A90E2 })
+      this.selectionBox.fill({ color: 0x4A90E2, alpha: 0.1 })
     }
   }
 
@@ -214,26 +252,25 @@ export class EventService {
    * 统一处理鼠标抬起事件
    */
   private handlePointerUp(event: FederatedPointerEvent): void {
-    const currentPos = { x: event.global.x, y: event.global.y }
+    const worldPos = this.screenToWorld(event.global.x, event.global.y)
 
     // 处理拖拽结束
     if (this.isDragging && this.dragTargetId) {
-      const dx = currentPos.x - this.dragStartPos.x
-      const dy = currentPos.y - this.dragStartPos.y
+      const dx = worldPos.x - this.dragStartPos.x
+      const dy = worldPos.y - this.dragStartPos.y
 
       // 只有真正移动了才触发移动事件
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+      const threshold = 2 / (this.viewportService?.getViewport().zoom || 1)
+      if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
         const selectedIds = this.handlers.getSelectedIds?.()
         const isMultiSelect = selectedIds && selectedIds.length > 1 && selectedIds.includes(this.dragTargetId)
 
         if (isMultiSelect && this.handlers.onMultiElementMove && selectedIds) {
           // 多选拖拽：移动所有选中的元素
           this.handlers.onMultiElementMove(selectedIds, dx, dy)
-          //console.log(`多选拖拽完成: ${selectedIds.length} 个元素移动 (${dx}, ${dy})`)
         } else if (this.handlers.onElementMove) {
           // 单选拖拽：只移动当前元素
           this.handlers.onElementMove(this.dragTargetId, dx, dy)
-          //console.log(`拖拽完成: 元素 ${this.dragTargetId} 移动 (${dx}, ${dy})`)
         }
       }
 
@@ -247,15 +284,16 @@ export class EventService {
 
     // 处理框选或画布点击
     if (this.isBoxSelecting) {
-      const width = Math.abs(currentPos.x - this.boxStartPos.x)
-      const height = Math.abs(currentPos.y - this.boxStartPos.y)
+      const width = Math.abs(worldPos.x - this.boxStartPos.x)
+      const height = Math.abs(worldPos.y - this.boxStartPos.y)
       const currentTool = this.handlers.getCurrentTool?.()
 
       // 判断是点击还是框选（根据鼠标移动距离）
-      if (width > 5 || height > 5) {
+      const threshold = 5 / (this.viewportService?.getViewport().zoom || 1)
+      if (width > threshold || height > threshold) {
         // 拖动：框选元素
-        const x = Math.min(this.boxStartPos.x, currentPos.x)
-        const y = Math.min(this.boxStartPos.y, currentPos.y)
+        const x = Math.min(this.boxStartPos.x, worldPos.x)
+        const y = Math.min(this.boxStartPos.y, worldPos.y)
 
         if (this.handlers.onBoxSelection) {
           const selectedIds = this.handlers.onBoxSelection(x, y, width, height)
@@ -267,10 +305,10 @@ export class EventService {
       } else {
         // 点击：根据工具类型处理
         if (currentTool === 'rectangle' || currentTool === 'circle' || currentTool === 'triangle' || currentTool === 'text') {
-          // 绘图工具：创建元素
+          // 绘图工具：创建元素（使用世界坐标）
           if (this.handlers.onToolCreate) {
-            this.handlers.onToolCreate(currentPos.x, currentPos.y, currentTool)
-            console.log(`创建${currentTool}元素于 (${currentPos.x}, ${currentPos.y})`)
+            this.handlers.onToolCreate(worldPos.x, worldPos.y, currentTool)
+            console.log(`创建${currentTool}元素于 (${worldPos.x}, ${worldPos.y})`)
           }
         } else if (currentTool === 'select') {
           // 选择工具：清空选择
@@ -290,8 +328,8 @@ export class EventService {
    * 清除框选框
    */
   private clearSelectionBox(): void {
-    if (this.selectionBox && this.app) {
-      this.app.stage.removeChild(this.selectionBox)
+    if (this.selectionBox && this.worldContainer) {
+      this.worldContainer.removeChild(this.selectionBox)
       this.selectionBox.destroy()
       this.selectionBox = null
     }

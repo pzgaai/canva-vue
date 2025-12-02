@@ -8,6 +8,7 @@ View层 - 画布容器组件
     <floating-toolbar />
     <image-toolbar />
     <selection-overlay />
+    <mini-map />
     
     <!-- 文本编辑器 -->
     <text-editor 
@@ -28,6 +29,9 @@ View层 - 画布容器组件
     />
     
     <div ref="container" class="pixi-canvas">
+      <!-- 背景网格 -->
+      <grid-background />
+      
       <!-- 渲染图片元素 -->
       <image-element
         v-for="imageEl in imageElements"
@@ -53,6 +57,8 @@ import TopToolbar from '../../views/ui/TopToolbar.vue'
 import FloatingToolbar from '../../views/ui/FloatingToolbar.vue'
 import ImageToolbar from '../../views/ui/toolbar/ImageToolbar.vue'
 import SelectionOverlay from '../../views/overlays/SelectionOverlay.vue'
+import GridBackground from '../../views/canvas/GridBackground.vue'
+import MiniMap from '../../views/canvas/MiniMap.vue'
 import ImageElement from '../../views/elements/ImageElement.vue'
 import TextElement from '../../views/elements/TextElement.vue'
 import TextEditor from '../../views/overlays/TextEditor.vue'

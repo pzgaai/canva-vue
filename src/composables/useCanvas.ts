@@ -16,7 +16,7 @@ export function useCanvas() {
   const canvasStore = useCanvasStore()
   const elementsStore = useElementsStore()
   const selectionStore = useSelectionStore()
-  
+
   // 鼠标位置跟踪
   const mousePosition = ref({ x: 0, y: 0 })
 
@@ -75,6 +75,14 @@ export function useCanvas() {
       // 获取所有元素
       getAllElements: () => elementsStore.elements
     })
+
+    // 更新 canvasStore 的尺寸
+    const app = canvasService.getRenderService().getApp()
+    if (app) {
+      canvasStore.width = app.screen.width
+      canvasStore.height = app.screen.height
+      console.log('画布尺寸:', app.screen.width, 'x', app.screen.height)
+    }
 
     // 首次渲染元素
     canvasService.renderElements(elementsStore.elements)
@@ -181,10 +189,10 @@ export function useCanvas() {
   /** 鼠标移动事件处理 */
   const handleMouseMove = (event: MouseEvent) => {
     if (!container.value) return
-    
+
     // 获取容器的位置
     const rect = container.value.getBoundingClientRect()
-    
+
     // 计算鼠标在画布内的相对位置
     mousePosition.value = {
       x: event.clientX - rect.left,
@@ -200,7 +208,7 @@ export function useCanvas() {
       elementsStore.copySelectedElements()
       console.log('复制选中元素')
     }
-    
+
     // 处理 Ctrl+V 粘贴
     if ((event.ctrlKey || event.metaKey) && event.key === 'v') {
       event.preventDefault()
@@ -208,7 +216,7 @@ export function useCanvas() {
       elementsStore.pasteElements(mousePosition.value)
       console.log('粘贴元素到位置:', mousePosition.value)
     }
-    
+
     // 处理 Delete/Backspace 删除
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault()

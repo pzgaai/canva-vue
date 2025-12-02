@@ -2,7 +2,7 @@
  * Service层-画布服务（协调器）
  * 功能：协调各个子服务，提供统一的画布操作接口
  * 职责：
- * 1. 初始化和管理所有子服务（Render、Tool、Event）
+ * 1. 初始化和管理所有子服务（Render、Tool、Event、Viewport）
  * 2. 提供统一的画布生命周期管理
  * 3. 协调服务之间的通信
  */
@@ -10,19 +10,32 @@ import { Application, FederatedPointerEvent } from 'pixi.js'
 import { RenderService } from './RenderService'
 import { ToolService, type ToolType } from './ToolService'
 import { EventService, type EventHandlers } from './EventService'
+import { ViewportService } from './ViewportService'
+import { useCanvasStore } from '@/stores/canvas'
 import type { AnyElement } from '@/cores/types/element'
+import type { ViewportConfig } from '@/cores/types/canvas'
 
 export class CanvasService {
   private renderService: RenderService
   private toolService: ToolService
   private eventService: EventService
+  private viewportService: ViewportService
   // 是否已初始化，防止重复初始化
   private initialized = false
 
-  constructor() {
+  constructor(viewportConfig?: Partial<ViewportConfig>) {
     this.renderService = new RenderService()
     this.toolService = new ToolService()
     this.eventService = new EventService()
+    this.viewportService = new ViewportService(viewportConfig)
+  }
+
+  /**
+   * 同步视口状态到 store
+   */
+  private syncViewportToStore(): void {
+    const canvasStore = useCanvasStore()
+    canvasStore.updateViewport(this.viewportService.getViewport())
   }
 
   /**
@@ -31,18 +44,23 @@ export class CanvasService {
   async initialize(container: HTMLElement, handlers: EventHandlers): Promise<void> {
     if (this.initialized) return
 
-    // 初始化渲染服务
-    const app = await this.renderService.initialize(container)
+    // 初始化渲染服务（传入ViewportService）
+    const app = await this.renderService.initialize(container, this.viewportService)
 
     // 设置工具服务和事件服务的App实例
     this.toolService.setApp(app)
     this.eventService.setApp(app)
 
-    // 设置事件处理器
+    // 设置事件服务的ViewportService和WorldContainer
+    this.eventService.setViewportService(this.viewportService)
+    const worldContainer = this.renderService.getWorldContainer()
+    if (worldContainer) {
+      this.eventService.setWorldContainer(worldContainer)
+    }    // 设置事件处理器
     this.eventService.setHandlers(handlers)
 
     // 设置元素ID获取函数
-    this.eventService.setElementIdGetter((graphic) => 
+    this.eventService.setElementIdGetter((graphic) =>
       this.renderService.getElementIdByGraphic(graphic)
     )
 
@@ -51,6 +69,9 @@ export class CanvasService {
 
     // 绑定工具预览
     this.bindToolPreview(app)
+
+    // 绑定视口事件（滚轮缩放、拖拽平移）
+    this.bindViewportEvents(app)
 
     this.initialized = true
   }
@@ -61,6 +82,91 @@ export class CanvasService {
   private bindToolPreview(app: Application): void {
     app.stage.on('pointermove', (event: FederatedPointerEvent) => {
       this.toolService.updatePreview(event)
+    })
+  }
+
+  /**
+   * 绑定视口事件（滚轮缩放、中键拖拽）
+   */
+  private bindViewportEvents(app: Application): void {
+    const canvas = app.canvas
+
+    // 滚轮缩放
+    canvas.addEventListener('wheel', (event: WheelEvent) => {
+      event.preventDefault()
+
+      // 获取鼠标相对于画布的位置
+      const rect = canvas.getBoundingClientRect()
+      const mouseX = event.clientX - rect.left
+      const mouseY = event.clientY - rect.top
+
+      this.viewportService.handleWheel(event.deltaY, mouseX, mouseY)
+      this.renderService.updateViewportTransform()
+
+      // 同步视口状态到 store，更新工具栏缩放显示
+      this.syncViewportToStore()
+    }, { passive: false })
+
+    // 中键按下或空格+拖拽平移画布
+    let isPanning = false
+    let lastPanPos = { x: 0, y: 0 }
+    let spacePressed = false
+
+    // 监听空格键
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        spacePressed = true
+        const currentTool = this.toolService.getTool()
+        if (currentTool !== 'pan') {
+          canvas.style.cursor = 'grab'
+        }
+      }
+    })
+
+    window.addEventListener('keyup', (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spacePressed = false
+        const currentTool = this.toolService.getTool()
+        canvas.style.cursor = currentTool === 'pan' ? 'grab' : 'default'
+        if (isPanning) {
+          isPanning = false
+        }
+      }
+    })
+
+    canvas.addEventListener('pointerdown', (event: PointerEvent) => {
+      const currentTool = this.toolService.getTool()
+      // 中键、空格+左键、或pan工具+左键开始平移
+      if (event.button === 1 || (event.button === 0 && (spacePressed || currentTool === 'pan'))) {
+        event.preventDefault()
+        event.stopPropagation()
+        isPanning = true
+        lastPanPos = { x: event.clientX, y: event.clientY }
+        canvas.style.cursor = 'grabbing'
+      }
+    })
+
+    canvas.addEventListener('pointermove', (event: PointerEvent) => {
+      if (isPanning) {
+        const dx = event.clientX - lastPanPos.x
+        const dy = event.clientY - lastPanPos.y
+
+        this.viewportService.pan(dx, dy)
+        this.renderService.updateViewportTransform()
+
+        // 同步视口状态到 store
+        this.syncViewportToStore()
+
+        lastPanPos = { x: event.clientX, y: event.clientY }
+      }
+    })
+
+    canvas.addEventListener('pointerup', (event: PointerEvent) => {
+      if (event.button === 1 || (event.button === 0 && isPanning)) {
+        isPanning = false
+        const currentTool = this.toolService.getTool()
+        canvas.style.cursor = (spacePressed || currentTool === 'pan') ? 'grab' : 'default'
+      }
     })
   }
 
@@ -121,6 +227,13 @@ export class CanvasService {
   }
 
   /**
+   * 直接更新图形样式（颜色选择器优化）
+   */
+  updateGraphicStyle(elementId: string, element: AnyElement): void {
+    this.renderService.updateGraphicStyle(elementId, element)
+  }
+
+  /**
    * 获取工具服务
    */
   getToolService(): ToolService {
@@ -135,11 +248,19 @@ export class CanvasService {
   }
 
   /**
+   * 获取视口服务
+   */
+  getViewportService(): ViewportService {
+    return this.viewportService
+  }
+
+  /**
    * 清理资源
    */
   destroy(): void {
     this.eventService.destroy()
     this.toolService.destroy()
+    this.viewportService.destroy()
     this.renderService.destroy()
     this.initialized = false
   }
