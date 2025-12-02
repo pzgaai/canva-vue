@@ -63,7 +63,7 @@ export function useElementDrag(elementId: string) {
     }
 
     // 确定实际拖拽的元素ID列表
-    const draggedIds = selectionStore.selectedIds.length > 1 && selectionStore.selectedIds.includes(elementId)
+    draggedIds = selectionStore.selectedIds.length > 1 && selectionStore.selectedIds.includes(elementId)
       ? selectionStore.selectedIds
       : [elementId]
 
