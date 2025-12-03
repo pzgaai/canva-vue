@@ -184,6 +184,7 @@ export const useElementsStore = defineStore('elements', {
       // 创建新数组引用，触发 watch
       this.elements = [...this.elements]
       this.recordSnapshot()
+      this.saveToLocal()
     },
 
     /** 开始批处理（代理到 history） */
@@ -218,6 +219,7 @@ export const useElementsStore = defineStore('elements', {
       // 创建新数组引用，触发 watch
       this.elements = [...this.elements]
       this.recordSnapshot()
+      this.saveToLocal()
     },
 
     /**
