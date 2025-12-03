@@ -274,7 +274,15 @@ const onDrag = (event: MouseEvent) => {
     // 直接更新选中框 DOM，使用 translate3d 启用 GPU 加速
     const boxRef = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
     if (boxRef) {
-      boxRef.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0)`
+      // For single element, preserve rotation during drag
+      if (selectedIds.value.length === 1) {
+        const rotation = getSelectionRotation()
+        boxRef.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0) rotate(${rotation}rad)`
+        boxRef.style.transformOrigin = `${screenWidth / 2}px ${screenHeight / 2}px`
+      } else {
+        // Multi-selection has no rotation
+        boxRef.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0)`
+      }
       boxRef.style.width = `${screenWidth}px`
       boxRef.style.height = `${screenHeight}px`
     }
@@ -284,21 +292,16 @@ const onDrag = (event: MouseEvent) => {
       selectedIds.value.forEach(id => {
         const el = elementsStore.getElementById(id)
         if (el?.type === 'image') {
-          // Update DOM image element with rotation preserved (center-based)
+          // Update DOM image element - Images use world coordinates directly
           const imgEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
           if (imgEl) {
             const elWorldX = el.x + totalOffset.value.x
             const elWorldY = el.y + totalOffset.value.y
-            const elScreenPos = CoordinateTransform.worldToScreen(
-              elWorldX,
-              elWorldY,
-              viewport,
-              canvasWidth,
-              canvasHeight
-            )
-            imgEl.style.transform = `translate3d(${elScreenPos.x}px, ${elScreenPos.y}px, 0)`
-            imgEl.style.width = `${el.width * viewport.zoom}px`
-            imgEl.style.height = `${el.height * viewport.zoom}px`
+            const rotation = el.rotation || 0
+            // Images are positioned in world coordinates, no need to convert to screen
+            imgEl.style.transform = `translate3d(${elWorldX}px, ${elWorldY}px, 0) rotate(${rotation}rad)`
+            imgEl.style.width = `${el.width}px`
+            imgEl.style.height = `${el.height}px`
           }
         }
       })
@@ -334,26 +337,21 @@ const stopDrag = () => {
     elementsStore.saveToLocal()
 
     // Reset DOM image transforms after store update
-    const viewport = canvasStore.viewport
-    const canvasWidth = canvasStore.width || 800
-    const canvasHeight = canvasStore.height || 600
+    // const viewport = canvasStore.viewport
+    // const canvasWidth = canvasStore.width || 800
+    // const canvasHeight = canvasStore.height || 600
 
     requestAnimationFrame(() => {
       selectedIds.value.forEach(id => {
         const el = elementsStore.getElementById(id)
         if (el?.type === 'image') {
-          const imgEl = document.querySelector(`img[data-element-id="${id}"]`) as HTMLElement
+          const imgEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
           if (imgEl) {
-            const screenPos = CoordinateTransform.worldToScreen(
-              el.x,
-              el.y,
-              viewport,
-              canvasWidth,
-              canvasHeight
-            )
-            imgEl.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0)`
-            imgEl.style.width = `${el.width * viewport.zoom}px`
-            imgEl.style.height = `${el.height * viewport.zoom}px`
+            const rotation = el.rotation || 0
+            // Reset to final world coordinates after drag
+            imgEl.style.transform = `translate3d(${el.x}px, ${el.y}px, 0) rotate(${rotation}rad)`
+            imgEl.style.width = `${el.width}px`
+            imgEl.style.height = `${el.height}px`
           }
         }
       })
@@ -451,7 +449,14 @@ const onResize = (e: MouseEvent) => {
       const screenWidth = w * viewport.zoom
       const screenHeight = h * viewport.zoom
 
-      box.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0)`
+      // Preserve rotation during resize for single element
+      if (selectedIds.value.length === 1) {
+        const rotation = getSelectionRotation()
+        box.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0) rotate(${rotation}rad)`
+        box.style.transformOrigin = `${screenWidth / 2}px ${screenHeight / 2}px`
+      } else {
+        box.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0)`
+      }
       box.style.width = screenWidth + 'px'
       box.style.height = screenHeight + 'px'
     }
@@ -463,8 +468,8 @@ const onResize = (e: MouseEvent) => {
       const centerX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
       const centerY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
 
-      const canvasWidth = canvasStore.width || 800
-      const canvasHeight = canvasStore.height || 600
+      // const canvasWidth = canvasStore.width || 800
+      // const canvasHeight = canvasStore.height || 600
 
       selectedIds.value.forEach(id => {
         const el = elementsStore.getElementById(id)
@@ -485,27 +490,23 @@ const onResize = (e: MouseEvent) => {
           }
 
           if (el.type === 'image') {
-            // Update DOM image element - 转换为屏幕坐标
-            const imgEl = document.querySelector(`img[data-element-id="${id}"]`) as HTMLElement
+            // Update DOM image element - Images use world coordinates
+            const imgEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
             if (imgEl) {
-              const imgScreenPos = CoordinateTransform.worldToScreen(
-                newX,
-                newY,
-                viewport,
-                canvasWidth,
-                canvasHeight
-              )
-              imgEl.style.transform = `translate3d(${imgScreenPos.x}px, ${imgScreenPos.y}px, 0)`
-              imgEl.style.width = `${el.width * scaleX * viewport.zoom}px`
-              imgEl.style.height = `${el.height * scaleY * viewport.zoom}px`
+              const rotation = el.rotation || 0
+              imgEl.style.transform = `translate3d(${newX}px, ${newY}px, 0) rotate(${rotation}rad)`
+              imgEl.style.transformOrigin = 'center center'
+              imgEl.style.width = `${el.width * scaleX}px`
+              imgEl.style.height = `${el.height * scaleY}px`
             }
           } else if (el.type === 'text') {
             // Update DOM text element with rotation preserved (center-based)
             const textEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
             if (textEl) {
-              const centerX = newX + (el.width * scaleX) / 2
-              const centerY = newY + (el.height * scaleY) / 2
-              textEl.style.transform = `translate3d(${centerX}px, ${centerY}px, 0) rotate(${el.rotation || 0}rad)`
+              // const centerX = newX + (el.width * scaleX) / 2
+              // const centerY = newY + (el.height * scaleY) / 2
+              textEl.style.transform = `translate3d(${newX}px, ${newY}px, 0) rotate(${el.rotation || 0}rad)`
+              textEl.style.transformOrigin = 'center center'
               textEl.style.width = `${el.width * scaleX}px`
               textEl.style.height = `${el.height * scaleY}px`
             }
@@ -515,6 +516,8 @@ const onResize = (e: MouseEvent) => {
             const graphic = canvasService.getRenderService().getGraphic(id)
             if (graphic) {
               graphic.scale.set(scaleX, scaleY)
+              // Preserve rotation during resize
+              graphic.rotation = el.rotation || 0
             }
           }
         }
@@ -568,12 +571,16 @@ const stopResize = () => {
     elementsStore.saveToLocal()
     cachedBoundingBox.value = calculateBoundingBox()
 
-    // Reset graphics scale after store update
+    // Reset graphics scale after store update and preserve rotation
     requestAnimationFrame(() => {
       if (canvasService) {
         selectedIds.value.forEach(id => {
+          const el = elementsStore.getElementById(id)
           const graphic = canvasService.getRenderService().getGraphic(id)
-          if (graphic) graphic.scale.set(1, 1)
+          if (graphic && el) {
+            graphic.scale.set(1, 1)
+            graphic.rotation = el.rotation || 0
+          }
         })
       }
     })
@@ -587,11 +594,34 @@ const stopResize = () => {
 const startRotate = (e: MouseEvent) => {
   if (!cachedBoundingBox.value) return
   isRotating.value = true
-  const centerX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
-  const centerY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
-  const startAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX)
-  rotateStart.value = { x: centerX, y: centerY, angle: startAngle }
+
+  // Calculate center in world coordinates
+  const worldCenterX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
+  const worldCenterY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
+
+  // Convert world center to screen coordinates
+  const viewport = canvasStore.viewport
+  const canvasWidth = canvasStore.width || 800
+  const canvasHeight = canvasStore.height || 600
+  const screenCenter = CoordinateTransform.worldToScreen(
+    worldCenterX,
+    worldCenterY,
+    viewport,
+    canvasWidth,
+    canvasHeight
+  )
+
+  // Calculate initial angle from screen center to mouse position
+  const startAngle = Math.atan2(e.clientY - screenCenter.y, e.clientX - screenCenter.x)
+  rotateStart.value = { x: screenCenter.x, y: screenCenter.y, angle: startAngle }
   rotationAngle.value = 0
+
+  // Add dragging class for performance optimization
+  const boxRef = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
+  if (boxRef) {
+    boxRef.classList.add('dragging')
+  }
+
   document.addEventListener('mousemove', onRotate)
   document.addEventListener('mouseup', stopRotate)
   e.preventDefault()
@@ -600,75 +630,168 @@ const startRotate = (e: MouseEvent) => {
 
 const onRotate = (e: MouseEvent) => {
   if (!isRotating.value || !cachedBoundingBox.value) return
+
+  // Calculate current angle from screen center to mouse position
   const currentAngle = Math.atan2(e.clientY - rotateStart.value.y, e.clientX - rotateStart.value.x)
   rotationAngle.value = currentAngle - rotateStart.value.angle
 
+  // Use RAF throttling for performance
   if (animationFrameId) return
   animationFrameId = requestAnimationFrame(() => {
+    if (!cachedBoundingBox.value) return
+
+    const viewport = canvasStore.viewport
+    const canvasWidth = canvasStore.width || 800
+    const canvasHeight = canvasStore.height || 600
+
+    // Update selection box immediately
     const box = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
-    if (box && cachedBoundingBox.value) {
-      const centerX = cachedBoundingBox.value.width / 2
-      const centerY = cachedBoundingBox.value.height / 2
+    if (box && boundingBox.value) {
+      // Set transform origin to center of the box (in screen coordinates)
+      const centerX = boundingBox.value.width / 2
+      const centerY = boundingBox.value.height / 2
       box.style.transformOrigin = `${centerX}px ${centerY}px`
+
+      // Get current rotation and apply the delta
       const currentRotation = getSelectionRotation()
-      box.style.transform = `translate3d(${cachedBoundingBox.value.x}px, ${cachedBoundingBox.value.y}px, 0) rotate(${currentRotation + rotationAngle.value}rad)`
+      const newRotation = currentRotation + rotationAngle.value
+
+      // Apply transform with rotation (selection box is already positioned in screen coords)
+      box.style.transform = `translate3d(${boundingBox.value.x}px, ${boundingBox.value.y}px, 0) rotate(${newRotation}rad)`
     }
 
+    // Update all selected elements immediately
     if (canvasService && cachedBoundingBox.value) {
+      // const worldCenterX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
+      // const worldCenterY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
+
       selectedIds.value.forEach(id => {
         const el = elementsStore.getElementById(id)
-        if (el) {
-          if (el.type === 'image') {
-            const imgEl = document.querySelector(`img[data-element-id="${id}"]`) as HTMLElement
-            if (imgEl) {
-              const centerX = el.x + el.width / 2
-              const centerY = el.y + el.height / 2
-              imgEl.style.transform = `translate3d(${centerX}px, ${centerY}px, 0) rotate(${(el.rotation || 0) + rotationAngle.value}rad)`
-            }
-          } else if (el.type === 'text') {
-            const textEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
-            if (textEl) {
-              const centerX = el.x + el.width / 2
-              const centerY = el.y + el.height / 2
-              textEl.style.transform = `translate3d(${centerX}px, ${centerY}px, 0) rotate(${(el.rotation || 0) + rotationAngle.value}rad)`
-            }
-          } else {
-            const graphic = canvasService.getRenderService().getGraphic(id)
-            if (graphic) {
-              graphic.pivot.set(el.width / 2, el.height / 2)
-              graphic.x = el.x + el.width / 2
-              graphic.y = el.y + el.height / 2
-              graphic.rotation = (el.rotation || 0) + rotationAngle.value
-            }
+        if (!el) return
+
+        const newRotation = (el.rotation || 0) + rotationAngle.value
+
+        if (el.type === 'image') {
+          // Update DOM image element with rotation - Images use world coordinates
+          const imgEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
+          if (imgEl) {
+            // Images are positioned in world coordinates with transform-origin at center
+            imgEl.style.transformOrigin = '50% 50%'
+            imgEl.style.transform = `translate3d(${el.x}px, ${el.y}px, 0) rotate(${newRotation}rad)`
+            imgEl.style.width = `${el.width}px`
+            imgEl.style.height = `${el.height}px`
+          }
+        } else if (el.type === 'text') {
+          // Update DOM text element with rotation
+          const textEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
+          if (textEl) {
+            // Calculate element center in world coordinates
+            const elWorldCenterX = el.x + el.width / 2
+            const elWorldCenterY = el.y + el.height / 2
+
+            // Convert to screen coordinates
+            const screenCenter = CoordinateTransform.worldToScreen(
+              elWorldCenterX,
+              elWorldCenterY,
+              viewport,
+              canvasWidth,
+              canvasHeight
+            )
+
+            // Apply transform with center-based positioning and rotation
+            textEl.style.transformOrigin = '50% 50%'
+            textEl.style.transform = `translate3d(${screenCenter.x}px, ${screenCenter.y}px, 0) rotate(${newRotation}rad)`
+          }
+        } else {
+          // Update PIXI Graphics (shapes) - they're in world coordinates
+          const graphic = canvasService.getRenderService().getGraphic(id)
+          if (graphic) {
+            // Set pivot to center for rotation
+            graphic.pivot.set(el.width / 2, el.height / 2)
+            // Position at center in world coordinates
+            graphic.x = el.x + el.width / 2
+            graphic.y = el.y + el.height / 2
+            // Apply rotation
+            graphic.rotation = newRotation
           }
         }
       })
     }
+
     animationFrameId = null
   })
 }
 
 const stopRotate = () => {
   if (!isRotating.value) return
-  if (animationFrameId) cancelAnimationFrame(animationFrameId)
 
+  // Cancel pending animation frame
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId)
+    animationFrameId = null
+  }
+
+  // Remove dragging class
+  const boxRef = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
+  if (boxRef) {
+    boxRef.classList.remove('dragging')
+  }
+
+  // Apply rotation to store if there was a significant change
   if (Math.abs(rotationAngle.value) > 0.01) {
     elementsStore.updateElements(selectedIds.value, (el) => {
       el.rotation = (el.rotation || 0) + rotationAngle.value
     })
     elementsStore.saveToLocal()
 
+    // Reset elements to their final stored rotation values
+    const viewport = canvasStore.viewport
+    const canvasWidth = canvasStore.width || 800
+    const canvasHeight = canvasStore.height || 600
+
     requestAnimationFrame(() => {
       if (canvasService) {
         selectedIds.value.forEach(id => {
-          const graphic = canvasService.getRenderService().getGraphic(id)
-          if (graphic) {
-            const el = elementsStore.getElementById(id)
-            graphic.rotation = el?.rotation || 0
+          const el = elementsStore.getElementById(id)
+          if (!el) return
+
+          if (el.type === 'image') {
+            // Reset DOM image element to final rotation - Images use world coordinates
+            const imgEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
+            if (imgEl) {
+              imgEl.style.transformOrigin = '50% 50%'
+              imgEl.style.transform = `translate3d(${el.x}px, ${el.y}px, 0) rotate(${el.rotation || 0}rad)`
+              imgEl.style.width = `${el.width}px`
+              imgEl.style.height = `${el.height}px`
+            }
+          } else if (el.type === 'text') {
+            // Reset DOM text element to final rotation
+            const textEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
+            if (textEl) {
+              const elWorldCenterX = el.x + el.width / 2
+              const elWorldCenterY = el.y + el.height / 2
+              const screenCenter = CoordinateTransform.worldToScreen(
+                elWorldCenterX,
+                elWorldCenterY,
+                viewport,
+                canvasWidth,
+                canvasHeight
+              )
+              textEl.style.transform = `translate3d(${screenCenter.x}px, ${screenCenter.y}px, 0) rotate(${el.rotation || 0}rad)`
+            }
+          } else {
+            // Reset PIXI Graphics to final rotation
+            const graphic = canvasService.getRenderService().getGraphic(id)
+            if (graphic) {
+              graphic.rotation = el.rotation || 0
+            }
           }
         })
       }
     })
+
+    // Update cached bounding box after rotation
+    cachedBoundingBox.value = calculateBoundingBox()
   }
 
   isRotating.value = false

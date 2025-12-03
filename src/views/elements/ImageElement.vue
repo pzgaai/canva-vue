@@ -49,7 +49,8 @@ const containerStyle = computed(() => {
     top: '0',
     width: `${props.element.width}px`,
     height: `${props.element.height}px`,
-    transform: `translate3d(${x}px, ${y}px, 0) rotate(${props.element.rotation || 0}deg)`,
+    transform: `translate3d(${x}px, ${y}px, 0) rotate(${props.element.rotation || 0}rad)`,
+    transformOrigin: 'center center',
     opacity: props.element.opacity,
     visibility: (props.element.visible ? 'visible' : 'hidden') as 'visible' | 'hidden',
     pointerEvents: (props.element.locked ? 'none' : 'auto') as 'none' | 'auto',
@@ -85,7 +86,6 @@ const imageStyle = computed(() => {
 
 <style scoped>
 .image-element {
-  transform-origin: center center;
   /* 拖拽时启用 GPU 加速 */
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;

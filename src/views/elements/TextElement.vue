@@ -66,7 +66,8 @@ const containerStyle = computed(() => {
     top: '0',
     width: `${props.element.width}px`,
     height: `${props.element.height}px`,
-    transform: `translate3d(${x}px, ${y}px, 0) rotate(${props.element.rotation || 0}deg)`,
+    transform: `translate3d(${x}px, ${y}px, 0) rotate(${props.element.rotation || 0}rad)`,
+    transformOrigin: 'center center',
     opacity: props.element.opacity,
     visibility: (props.element.visible ? 'visible' : 'hidden') as 'visible' | 'hidden',
     pointerEvents: 'auto' as const,
@@ -123,11 +124,9 @@ const handleMouseMove = (e: MouseEvent) => {
     const newX = elementStartPos.value.x + dx
     const newY = elementStartPos.value.y + dy
 
-    // 直接操作 DOM，不触发响应式更新（使用中心定位）
+    // 直接操作 DOM，不触发响应式更新
     if (elementRef.value) {
-      const centerX = newX + props.element.width / 2
-      const centerY = newY + props.element.height / 2
-      elementRef.value.style.transform = `translate3d(${centerX}px, ${centerY}px, 0) rotate(${props.element.rotation || 0}rad)`
+      elementRef.value.style.transform = `translate3d(${newX}px, ${newY}px, 0) rotate(${props.element.rotation || 0}rad)`
     }
 
     animationFrameId = null

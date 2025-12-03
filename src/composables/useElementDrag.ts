@@ -103,13 +103,20 @@ export function useElementDrag(elementId: string) {
   const handleMouseMove = (e: MouseEvent) => {
     if (!isDragging.value) return
 
-    const dx = e.clientX - dragStartPos.value.x
-    const dy = e.clientY - dragStartPos.value.y
+    // Calculate screen space offset
+    const screenDx = e.clientX - dragStartPos.value.x
+    const screenDy = e.clientY - dragStartPos.value.y
 
-    totalOffset.value = { x: dx, y: dy }
+    // Convert to world space offset (considering viewport zoom)
+    const viewport = canvasService?.getViewportService().getViewport()
+    const zoom = viewport?.zoom || 1
+    const worldDx = screenDx / zoom
+    const worldDy = screenDy / zoom
 
-    // 立即更新全局拖拽偏移（不等待 RAF）
-    updateDragOffset({ x: dx, y: dy })
+    totalOffset.value = { x: worldDx, y: worldDy }
+
+    // 立即更新全局拖拽偏移（世界坐标）
+    updateDragOffset({ x: worldDx, y: worldDy })
 
     // 使用 RAF 节流
     if (animationFrameId !== null) {
@@ -120,15 +127,14 @@ export function useElementDrag(elementId: string) {
       const element = elementsStore.getElementById(elementId)
       if (!element) return
 
+      // Calculate new world position
       const newX = initialTransform.x + totalOffset.value.x
       const newY = initialTransform.y + totalOffset.value.y
 
       // 直接操作 DOM，使用 translate3d 启用 GPU 加速
-      // 使用中心坐标（与元素初始渲染保持一致）
+      // Images have transform-origin: center center, so we need to position at top-left
       if (currentElement) {
-        const centerX = newX + element.width / 2
-        const centerY = newY + element.height / 2
-        currentElement.style.transform = `translate3d(${centerX}px, ${centerY}px, 0) rotate(${initialTransform.rotation}rad)`
+        currentElement.style.transform = `translate3d(${newX}px, ${newY}px, 0) rotate(${initialTransform.rotation}deg)`
       }
 
       // 同步更新 Canvas 元素位置（如果存在）
@@ -177,8 +183,8 @@ export function useElementDrag(elementId: string) {
       currentElement.style.willChange = 'auto'
     }
 
-    // 应用最终偏移到 Store（只在有实际移动时）
-    if (Math.abs(totalOffset.value.x) > 1 || Math.abs(totalOffset.value.y) > 1) {
+    // 应用最终偏移到 Store（只在有实际移动时，使用世界坐标阈值）
+    if (Math.abs(totalOffset.value.x) > 0.5 || Math.abs(totalOffset.value.y) > 0.5) {
       const selectedIds = selectionStore.selectedIds
       const isMultiSelect = selectedIds.length > 1 && selectedIds.includes(elementId)
 

@@ -202,9 +202,13 @@ export class RenderService {
     const graphic = new Graphics()
     this.drawShape(graphic, element)
 
-    // 元素在世界坐标系中的位置
-    graphic.x = element.x
-    graphic.y = element.y
+    // Set pivot to center for rotation
+    graphic.pivot.set(element.width / 2, element.height / 2)
+    // Position at center in world coordinates
+    graphic.x = element.x + element.width / 2
+    graphic.y = element.y + element.height / 2
+    // Apply rotation
+    graphic.rotation = element.rotation || 0
     graphic.eventMode = 'static'
     graphic.cursor = 'pointer'
 
