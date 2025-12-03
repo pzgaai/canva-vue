@@ -92,6 +92,26 @@ let animationFrameId: number | null = null
 // 使用 ref 缓存边界框，避免频繁计算
 const cachedBoundingBox = ref<{ x: number; y: number; width: number; height: number } | null>(null)
 
+/**
+ * 将选中的元素ID展开：如果包含组合元素，则把其子元素一并返回
+ */
+const getExpandedIds = (ids: string[]): string[] => {
+  const expanded = new Set<string>()
+
+  ids.forEach(id => {
+    const el = elementsStore.getElementById(id)
+    if (!el) return
+
+    expanded.add(id)
+
+    if (el.type === 'group' && 'children' in el && Array.isArray(el.children)) {
+      el.children.forEach(childId => expanded.add(childId))
+    }
+  })
+
+  return Array.from(expanded)
+}
+
 // 计算选中元素的组合边界框
 const calculateBoundingBox = () => {
   if (selectedIds.value.length === 0) return null
@@ -224,7 +244,7 @@ const startDrag = (event: MouseEvent) => {
 
   // 立即同步计算边界框，确保拖拽开始时位置正确
   cachedBoundingBox.value = calculateBoundingBox()
-  
+
   // Force immediate recalculation to ensure latest element positions
   requestAnimationFrame(() => {
     cachedBoundingBox.value = calculateBoundingBox()
@@ -328,8 +348,10 @@ const onDrag = (event: MouseEvent) => {
     }
 
     // 同步更新元素位置（世界坐标）
-    if (selectedIds.value.length > 0) {
-      selectedIds.value.forEach(id => {
+    const dragIds = getExpandedIds(selectedIds.value)
+
+    if (dragIds.length > 0) {
+      dragIds.forEach(id => {
         const el = elementsStore.getElementById(id)
         if (el?.type === 'image') {
           // Update DOM image element - Images use world coordinates directly
@@ -347,7 +369,7 @@ const onDrag = (event: MouseEvent) => {
       })
       // Update PIXI Graphics（使用世界坐标）
       if (canvasService) {
-        syncDragPosition(selectedIds.value, totalOffset.value.x, totalOffset.value.y)
+        syncDragPosition(dragIds, totalOffset.value.x, totalOffset.value.y)
       }
     }
 
@@ -373,21 +395,12 @@ const stopDrag = () => {
 
   // 应用最终偏移到 Store
   if ((Math.abs(totalOffset.value.x) > 1 || Math.abs(totalOffset.value.y) > 1) && selectedIds.value.length > 0) {
-    // 如果选中的是组合元素，需要同时移动组合及其子元素
-    const idsToMove = new Set<string>()
-    selectedIds.value.forEach(id => {
-      const el = elementsStore.getElementById(id)
-      if (!el) return
-      idsToMove.add(id)
-      if (el.type === 'group' && 'children' in el && Array.isArray(el.children)) {
-        el.children.forEach(childId => idsToMove.add(childId))
-      }
-    })
+    const idsToMove = getExpandedIds(selectedIds.value)
 
-    elementsStore.moveElements(Array.from(idsToMove), totalOffset.value.x, totalOffset.value.y)
+    elementsStore.moveElements(idsToMove, totalOffset.value.x, totalOffset.value.y)
 
     requestAnimationFrame(() => {
-      selectedIds.value.forEach(id => {
+      idsToMove.forEach(id => {
         const el = elementsStore.getElementById(id)
         if (el?.type === 'image') {
           const imgEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
