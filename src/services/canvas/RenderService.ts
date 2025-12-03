@@ -202,9 +202,13 @@ export class RenderService {
     const graphic = new Graphics()
     this.drawShape(graphic, element)
 
-    // 元素在世界坐标系中的位置
-    graphic.x = element.x
-    graphic.y = element.y
+    // Set pivot to center for rotation
+    graphic.pivot.set(element.width / 2, element.height / 2)
+    // Position at center in world coordinates
+    graphic.x = element.x + element.width / 2
+    graphic.y = element.y + element.height / 2
+    // Apply rotation
+    graphic.rotation = element.rotation || 0
     graphic.eventMode = 'static'
     graphic.cursor = 'pointer'
 
@@ -221,8 +225,10 @@ export class RenderService {
    */
   private updateGraphic(graphic: Graphics, element: AnyElement): void {
     this.drawShape(graphic, element)
-    graphic.x = element.x
-    graphic.y = element.y
+    graphic.pivot.set(element.width / 2, element.height / 2)
+    graphic.x = element.x + element.width / 2
+    graphic.y = element.y + element.height / 2
+    graphic.rotation = element.rotation || 0
   }
 
   /**
@@ -290,8 +296,9 @@ export class RenderService {
   updateElementPosition(elementId: string, x: number, y: number): void {
     const graphic = this.graphicMap.get(elementId)
     if (graphic) {
-      graphic.x = x
-      graphic.y = y
+      // Position is center-based for rotation
+      graphic.x = x + graphic.width / 2
+      graphic.y = y + graphic.height / 2
     }
   }
 
@@ -303,8 +310,9 @@ export class RenderService {
     updates.forEach(({ id, x, y }) => {
       const graphic = this.graphicMap.get(id)
       if (graphic) {
-        graphic.x = x
-        graphic.y = y
+        // Position is center-based for rotation
+        graphic.x = x + graphic.width / 2
+        graphic.y = y + graphic.height / 2
       }
     })
   }

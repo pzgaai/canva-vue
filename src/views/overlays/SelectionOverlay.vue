@@ -13,7 +13,8 @@
       ref="singleBoxRef"
       class="selection-box single"
       :style="{
-        transform: `translate3d(${boundingBox.x}px, ${boundingBox.y}px, 0)`,
+        transform: `translate3d(${boundingBox.x}px, ${boundingBox.y}px, 0) rotate(${getSelectionRotation()}rad)`,
+        transformOrigin: `${boundingBox.width / 2}px ${boundingBox.height / 2}px`,
         width: boundingBox.width + 'px',
         height: boundingBox.height + 'px'
       }"
@@ -24,6 +25,7 @@
       <div class="resize-handle top-right" @mousedown="startResize($event, 'tr')"></div>
       <div class="resize-handle bottom-left" @mousedown="startResize($event, 'bl')"></div>
       <div class="resize-handle bottom-right" @mousedown="startResize($event, 'br')"></div>
+      <div class="rotate-handle" @mousedown="startRotate($event)"></div>
     </div>
 
     <!-- 多选边框 - 可拖拽 -->
@@ -43,6 +45,7 @@
       <div class="resize-handle top-right" @mousedown="startResize($event, 'tr')"></div>
       <div class="resize-handle bottom-left" @mousedown="startResize($event, 'bl')"></div>
       <div class="resize-handle bottom-right" @mousedown="startResize($event, 'br')"></div>
+      <div class="rotate-handle" @mousedown="startRotate($event)"></div>
     </div>
   </div>
 </template>
@@ -54,8 +57,11 @@ import { useElementsStore } from '@/stores/elements'
 import { useCanvasStore } from '@/stores/canvas'
 import { useDragSync } from '@/composables/useDragSync'
 import { useDragState } from '@/composables/useDragState'
+import { useRotate } from '@/composables/useRotate'
+import { useResize } from '@/composables/useResize'
 import { CoordinateTransform } from '@/cores/viewport/CoordinateTransform'
 import type { CanvasService } from '@/services/canvas/CanvasService'
+import { useAlignment } from '@/composables/useAlignment'
 
 const selectionStore = useSelectionStore()
 const elementsStore = useElementsStore()
@@ -65,14 +71,20 @@ const canvasStore = useCanvasStore()
 const canvasService = inject<CanvasService>('canvasService')
 const { syncDragPosition } = canvasService ? useDragSync(canvasService) : { syncDragPosition: () => {} }
 const { getDragState, startDrag: startGlobalDrag, updateDragOffset: updateGlobalDragOffset, endDrag: endGlobalDrag } = useDragState()
+const { updateElementRotation, applyRotationToStore, resetElementsToFinalRotation } = useRotate(canvasService || null)
+const { updateElementsResize, applyResizeToStore, resetGraphicsAfterResize, updateSelectionBox } = useResize(canvasService || null)
+const { checkAlignment, clearAlignment } = useAlignment()
 
 const selectedIds = computed(() => selectionStore.selectedIds)
 const isDragging = ref(false)
 const isResizing = ref(false)
+const isRotating = ref(false)
 const dragStartPos = ref({ x: 0, y: 0 })
 const resizeStart = ref({ x: 0, y: 0, w: 0, h: 0 })
+const rotateStart = ref({ x: 0, y: 0, angle: 0 })
 const resizeHandle = ref('')
 const totalOffset = ref({ x: 0, y: 0 }) // 累计拖拽偏移量
+const rotationAngle = ref(0)
 const singleBoxRef = ref<HTMLElement>()
 const multiBoxRef = ref<HTMLElement>()
 let animationFrameId: number | null = null
@@ -80,13 +92,45 @@ let animationFrameId: number | null = null
 // 使用 ref 缓存边界框，避免频繁计算
 const cachedBoundingBox = ref<{ x: number; y: number; width: number; height: number } | null>(null)
 
+/**
+ * 将选中的元素ID展开：如果包含组合元素，则把其子元素一并返回
+ */
+const getExpandedIds = (ids: string[]): string[] => {
+  const expanded = new Set<string>()
+
+  ids.forEach(id => {
+    const el = elementsStore.getElementById(id)
+    if (!el) return
+
+    expanded.add(id)
+
+    if (el.type === 'group' && 'children' in el && Array.isArray(el.children)) {
+      el.children.forEach(childId => expanded.add(childId))
+    }
+  })
+
+  return Array.from(expanded)
+}
+
 // 计算选中元素的组合边界框
 const calculateBoundingBox = () => {
   if (selectedIds.value.length === 0) return null
 
-  const selectedElements = selectedIds.value
-    .map(id => elementsStore.getElementById(id))
-    .filter(el => el != null)
+  // 展开组合元素：使用其子元素参与边界框计算
+  const selectedElements = selectedIds.value.flatMap(id => {
+    const el = elementsStore.getElementById(id)
+    if (!el) return []
+
+    if (el.type === 'group' && 'children' in el && Array.isArray(el.children)) {
+      const children = el.children
+        .map(childId => elementsStore.getElementById(childId))
+        .filter(child => child != null)
+      // 如果组合没有有效子元素，退回到组合自身
+      return children.length > 0 ? children : [el]
+    }
+
+    return [el]
+  })
 
   if (selectedElements.length === 0) return null
 
@@ -115,7 +159,7 @@ const calculateBoundingBox = () => {
 watch(
   () => selectedIds.value.map(id => {
     const el = elementsStore.getElementById(id)
-    return el ? `${el.x},${el.y},${el.width},${el.height}` : ''
+    return el ? `${el.x},${el.y},${el.width},${el.height},${el.rotation || 0}` : ''
   }).join('|'),
   () => {
     cachedBoundingBox.value = calculateBoundingBox()
@@ -157,14 +201,22 @@ const worldBoundingBox = computed(() => {
   return cachedBoundingBox.value
 })
 
+// Get rotation for selection box
+const getSelectionRotation = () => {
+  if (selectedIds.value.length === 1 && selectedIds.value[0]) {
+    const el = elementsStore.getElementById(selectedIds.value[0])
+    return el?.rotation || 0
+  }
+  return 0
+}
 // 转换为屏幕坐标的边界框（用于CSS渲染）
 const boundingBox = computed(() => {
   if (!worldBoundingBox.value) return null
-  
+
   const viewport = canvasStore.viewport
   const canvasWidth = canvasStore.width || 800
   const canvasHeight = canvasStore.height || 600
-  
+
   // 将世界坐标的左上角转换为屏幕坐标
   const topLeft = CoordinateTransform.worldToScreen(
     worldBoundingBox.value.x,
@@ -173,11 +225,11 @@ const boundingBox = computed(() => {
     canvasWidth,
     canvasHeight
   )
-  
+
   // 计算缩放后的尺寸
   const screenWidth = worldBoundingBox.value.width * viewport.zoom
   const screenHeight = worldBoundingBox.value.height * viewport.zoom
-  
+
   return {
     x: topLeft.x,
     y: topLeft.y,
@@ -222,16 +274,33 @@ const onDrag = (event: MouseEvent) => {
   // 计算屏幕空间的偏移量
   const screenDx = event.clientX - dragStartPos.value.x
   const screenDy = event.clientY - dragStartPos.value.y
-  
+
   // 转换为世界空间的偏移量（考虑缩放）
   const viewport = canvasStore.viewport
   const worldDx = screenDx / viewport.zoom
   const worldDy = screenDy / viewport.zoom
 
-  totalOffset.value = { x: worldDx, y: worldDy }
+  // 应用对齐吸附
+  let finalDx = worldDx
+  let finalDy = worldDy
 
-  // 立即更新全局拖拽偏移（世界坐标）
-  updateGlobalDragOffset({ x: worldDx, y: worldDy })
+  if (cachedBoundingBox.value) {
+    const targetRect = {
+      x: cachedBoundingBox.value.x + worldDx,
+      y: cachedBoundingBox.value.y + worldDy,
+      width: cachedBoundingBox.value.width,
+      height: cachedBoundingBox.value.height
+    }
+
+    const { dx: snapDx, dy: snapDy } = checkAlignment(targetRect, selectedIds.value)
+    finalDx += snapDx
+    finalDy += snapDy
+  }
+
+  totalOffset.value = { x: finalDx, y: finalDy }
+
+  // 立即更新全局拖拽偏移（世界坐标，包含吸附修正）
+  updateGlobalDragOffset({ x: finalDx, y: finalDy })
 
   // 使用 RAF 节流
   if (animationFrameId !== null) {
@@ -242,7 +311,7 @@ const onDrag = (event: MouseEvent) => {
     // 计算世界坐标的新位置
     const worldX = cachedBoundingBox.value!.x + totalOffset.value.x
     const worldY = cachedBoundingBox.value!.y + totalOffset.value.y
-    
+
     // 转换为屏幕坐标
     const canvasWidth = canvasStore.width || 800
     const canvasHeight = canvasStore.height || 600
@@ -253,44 +322,49 @@ const onDrag = (event: MouseEvent) => {
       canvasWidth,
       canvasHeight
     )
-    
+
     const screenWidth = cachedBoundingBox.value!.width * viewport.zoom
     const screenHeight = cachedBoundingBox.value!.height * viewport.zoom
-    
+
     // 直接更新选中框 DOM，使用 translate3d 启用 GPU 加速
     const boxRef = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
     if (boxRef) {
-      boxRef.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0)`
+      // For single element, preserve rotation during drag
+      if (selectedIds.value.length === 1) {
+        const rotation = getSelectionRotation()
+        boxRef.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0) rotate(${rotation}rad)`
+        boxRef.style.transformOrigin = `${screenWidth / 2}px ${screenHeight / 2}px`
+      } else {
+        // Multi-selection has no rotation
+        boxRef.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0)`
+      }
       boxRef.style.width = `${screenWidth}px`
       boxRef.style.height = `${screenHeight}px`
     }
 
     // 同步更新元素位置（世界坐标）
-    if (selectedIds.value.length > 0) {
-      selectedIds.value.forEach(id => {
+    const dragIds = getExpandedIds(selectedIds.value)
+
+    if (dragIds.length > 0) {
+      dragIds.forEach(id => {
         const el = elementsStore.getElementById(id)
         if (el?.type === 'image') {
-          // Update DOM image element
+          // Update DOM image element - Images use world coordinates directly
           const imgEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
           if (imgEl) {
             const elWorldX = el.x + totalOffset.value.x
             const elWorldY = el.y + totalOffset.value.y
-            const elScreenPos = CoordinateTransform.worldToScreen(
-              elWorldX,
-              elWorldY,
-              viewport,
-              canvasWidth,
-              canvasHeight
-            )
-            imgEl.style.transform = `translate3d(${elScreenPos.x}px, ${elScreenPos.y}px, 0)`
-            imgEl.style.width = `${el.width * viewport.zoom}px`
-            imgEl.style.height = `${el.height * viewport.zoom}px`
+            const rotation = el.rotation || 0
+            // Images are positioned in world coordinates, no need to convert to screen
+            imgEl.style.transform = `translate3d(${elWorldX}px, ${elWorldY}px, 0) rotate(${rotation}rad)`
+            imgEl.style.width = `${el.width}px`
+            imgEl.style.height = `${el.height}px`
           }
         }
       })
       // Update PIXI Graphics（使用世界坐标）
       if (canvasService) {
-        syncDragPosition(selectedIds.value, totalOffset.value.x, totalOffset.value.y)
+        syncDragPosition(dragIds, totalOffset.value.x, totalOffset.value.y)
       }
     }
 
@@ -316,30 +390,22 @@ const stopDrag = () => {
 
   // 应用最终偏移到 Store
   if ((Math.abs(totalOffset.value.x) > 1 || Math.abs(totalOffset.value.y) > 1) && selectedIds.value.length > 0) {
-    elementsStore.moveElements(selectedIds.value, totalOffset.value.x, totalOffset.value.y)
-    elementsStore.saveToLocal()
+    const idsToMove = getExpandedIds(selectedIds.value)
+
+    elementsStore.moveElements(idsToMove, totalOffset.value.x, totalOffset.value.y)
 
     // Reset DOM image transforms after store update
-    const viewport = canvasStore.viewport
-    const canvasWidth = canvasStore.width || 800
-    const canvasHeight = canvasStore.height || 600
-    
     requestAnimationFrame(() => {
-      selectedIds.value.forEach(id => {
+      idsToMove.forEach(id => {
         const el = elementsStore.getElementById(id)
         if (el?.type === 'image') {
-          const imgEl = document.querySelector(`img[data-element-id="${id}"]`) as HTMLElement
+          const imgEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
           if (imgEl) {
-            const screenPos = CoordinateTransform.worldToScreen(
-              el.x,
-              el.y,
-              viewport,
-              canvasWidth,
-              canvasHeight
-            )
-            imgEl.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0)`
-            imgEl.style.width = `${el.width * viewport.zoom}px`
-            imgEl.style.height = `${el.height * viewport.zoom}px`
+            const rotation = el.rotation || 0
+            // Reset to final world coordinates after drag
+            imgEl.style.transform = `translate3d(${el.x}px, ${el.y}px, 0) rotate(${rotation}rad)`
+            imgEl.style.width = `${el.width}px`
+            imgEl.style.height = `${el.height}px`
           }
         }
       })
@@ -354,6 +420,7 @@ const stopDrag = () => {
 
   // 结束全局拖拽状态
   endGlobalDrag()
+  clearAlignment()
 
   // 移除全局事件监听
   document.removeEventListener('mousemove', onDrag)
@@ -373,25 +440,25 @@ const startResize = (e: MouseEvent, handle: string) => {
 
 const onResize = (e: MouseEvent) => {
   if (!isResizing.value || !cachedBoundingBox.value) return
-  
+
   const viewport = canvasStore.viewport
-  
+
   // 计算屏幕空间的偏移量
   const screenDx = e.clientX - resizeStart.value.x
   const screenDy = e.clientY - resizeStart.value.y
-  
+
   // 转换为世界空间的偏移量
   const worldDx = screenDx / viewport.zoom
   const worldDy = screenDy / viewport.zoom
-  
+
   let w = resizeStart.value.w
   let h = resizeStart.value.h
-  
+
   if (resizeHandle.value.includes('r')) w += worldDx
   if (resizeHandle.value.includes('l')) w -= worldDx
   if (resizeHandle.value.includes('b')) h += worldDy
   if (resizeHandle.value.includes('t')) h -= worldDy
-  
+
   const isCircle = selectedIds.value.some(id => {
     const el = elementsStore.getElementById(id)
     return el?.type === 'shape' && 'shapeType' in el && el.shapeType === 'circle'
@@ -403,100 +470,19 @@ const onResize = (e: MouseEvent) => {
     w = resizeStart.value.w * scale
     h = resizeStart.value.h * scale
   }
-  
+
   if (animationFrameId) return
   animationFrameId = requestAnimationFrame(() => {
     const box = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
     if (box && cachedBoundingBox.value) {
-      // 计算世界坐标的位置
-      let worldX, worldY
-      if (selectedIds.value.length > 1) {
-        // Multi-element: center the selection box
-        const centerX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
-        const centerY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
-        worldX = centerX - w / 2
-        worldY = centerY - h / 2
-      } else {
-        // Single element: anchor from corner
-        worldX = cachedBoundingBox.value.x
-        worldY = cachedBoundingBox.value.y
-        if (resizeHandle.value.includes('l')) worldX += cachedBoundingBox.value.width - w
-        if (resizeHandle.value.includes('t')) worldY += cachedBoundingBox.value.height - h
-      }
-      
-      // 转换为屏幕坐标
-      const canvasWidth = canvasStore.width || 800
-      const canvasHeight = canvasStore.height || 600
-      const screenPos = CoordinateTransform.worldToScreen(
-        worldX,
-        worldY,
-        viewport,
-        canvasWidth,
-        canvasHeight
-      )
-      const screenWidth = w * viewport.zoom
-      const screenHeight = h * viewport.zoom
-      
-      box.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0)`
-      box.style.width = screenWidth + 'px'
-      box.style.height = screenHeight + 'px'
+      updateSelectionBox(box, cachedBoundingBox.value, w, h, resizeHandle.value, selectedIds.value)
     }
-    
-    // Render cache shapes during resize
+
+    // Update elements during resize
     if (canvasService && cachedBoundingBox.value) {
-      const scaleX = w / resizeStart.value.w
-      const scaleY = h / resizeStart.value.h
-      const centerX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
-      const centerY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
-      
-      const canvasWidth = canvasStore.width || 800
-      const canvasHeight = canvasStore.height || 600
-      
-      selectedIds.value.forEach(id => {
-        const el = elementsStore.getElementById(id)
-        if (el) {
-          let newX, newY
-          if (selectedIds.value.length > 1) {
-            // Multi-element: scale from center
-            const relX = el.x + el.width / 2 - centerX
-            const relY = el.y + el.height / 2 - centerY
-            newX = centerX + relX * scaleX - el.width * scaleX / 2
-            newY = centerY + relY * scaleY - el.height * scaleY / 2
-          } else {
-            // Single element: scale from corner
-            newX = el.x
-            newY = el.y
-            if (resizeHandle.value.includes('l')) newX += el.width * (1 - scaleX)
-            if (resizeHandle.value.includes('t')) newY += el.height * (1 - scaleY)
-          }
-          
-          if (el.type === 'image') {
-            // Update DOM image element - 转换为屏幕坐标
-            const imgEl = document.querySelector(`img[data-element-id="${id}"]`) as HTMLElement
-            if (imgEl) {
-              const imgScreenPos = CoordinateTransform.worldToScreen(
-                newX,
-                newY,
-                viewport,
-                canvasWidth,
-                canvasHeight
-              )
-              imgEl.style.transform = `translate3d(${imgScreenPos.x}px, ${imgScreenPos.y}px, 0)`
-              imgEl.style.width = `${el.width * scaleX * viewport.zoom}px`
-              imgEl.style.height = `${el.height * scaleY * viewport.zoom}px`
-            }
-          } else {
-            // Update PIXI Graphics - 使用世界坐标
-            canvasService.getRenderService().updateElementPosition(id, newX, newY)
-            const graphic = canvasService.getRenderService().getGraphic(id)
-            if (graphic) {
-              graphic.scale.set(scaleX, scaleY)
-            }
-          }
-        }
-      })
+      updateElementsResize(selectedIds.value, cachedBoundingBox.value, w, h, resizeHandle.value)
     }
-    
+
     animationFrameId = null
   })
 }
@@ -504,60 +490,144 @@ const onResize = (e: MouseEvent) => {
 const stopResize = () => {
   if (!isResizing.value || !cachedBoundingBox.value) return
   if (animationFrameId) cancelAnimationFrame(animationFrameId)
-  
+
   const viewport = canvasStore.viewport
   const box = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
-  
+
   // 从屏幕尺寸计算回世界尺寸
   const screenWidth = parseFloat(box?.style.width || '0')
   const screenHeight = parseFloat(box?.style.height || '0')
   const worldWidth = screenWidth / viewport.zoom
   const worldHeight = screenHeight / viewport.zoom
-  
+
   const scaleX = worldWidth / cachedBoundingBox.value.width
   const scaleY = worldHeight / cachedBoundingBox.value.height
-  
+
   if (Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01) {
-    const centerX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
-    const centerY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
-    
-    elementsStore.updateElements(selectedIds.value, (el) => {
-      let x, y
-      if (selectedIds.value.length > 1) {
-        // Multi-element: scale from center
-        const relX = el.x + el.width / 2 - centerX
-        const relY = el.y + el.height / 2 - centerY
-        x = centerX + relX * scaleX - el.width * scaleX / 2
-        y = centerY + relY * scaleY - el.height * scaleY / 2
-      } else {
-        // Single element: scale from corner
-        x = el.x
-        y = el.y
-        if (resizeHandle.value.includes('l')) x += el.width * (1 - scaleX)
-        if (resizeHandle.value.includes('t')) y += el.height * (1 - scaleY)
-      }
-      el.x = x
-      el.y = y
-      el.width = el.width * scaleX
-      el.height = el.height * scaleY
-    })
+    applyResizeToStore(selectedIds.value, cachedBoundingBox.value, scaleX, scaleY, resizeHandle.value)
     elementsStore.saveToLocal()
     cachedBoundingBox.value = calculateBoundingBox()
-    
-    // Reset graphics scale after store update
+
     requestAnimationFrame(() => {
       if (canvasService) {
-        selectedIds.value.forEach(id => {
-          const graphic = canvasService.getRenderService().getGraphic(id)
-          if (graphic) graphic.scale.set(1, 1)
-        })
+        resetGraphicsAfterResize(selectedIds.value)
       }
     })
   }
-  
+
   isResizing.value = false
   document.removeEventListener('mousemove', onResize)
   document.removeEventListener('mouseup', stopResize)
+}
+
+const startRotate = (e: MouseEvent) => {
+  if (!cachedBoundingBox.value) return
+  isRotating.value = true
+
+  // Calculate center in world coordinates
+  const worldCenterX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
+  const worldCenterY = cachedBoundingBox.value.y + cachedBoundingBox.value.height / 2
+
+  // Convert world center to screen coordinates
+  const viewport = canvasStore.viewport
+  const canvasWidth = canvasStore.width || 800
+  const canvasHeight = canvasStore.height || 600
+  const screenCenter = CoordinateTransform.worldToScreen(
+    worldCenterX,
+    worldCenterY,
+    viewport,
+    canvasWidth,
+    canvasHeight
+  )
+
+  // Calculate initial angle from screen center to mouse position
+  const startAngle = Math.atan2(e.clientY - screenCenter.y, e.clientX - screenCenter.x)
+  rotateStart.value = { x: screenCenter.x, y: screenCenter.y, angle: startAngle }
+  rotationAngle.value = 0
+
+  // Add dragging class for performance optimization
+  const boxRef = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
+  if (boxRef) {
+    boxRef.classList.add('dragging')
+  }
+
+  document.addEventListener('mousemove', onRotate)
+  document.addEventListener('mouseup', stopRotate)
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+const onRotate = (e: MouseEvent) => {
+  if (!isRotating.value || !cachedBoundingBox.value) return
+
+  // Calculate current angle from screen center to mouse position
+  const currentAngle = Math.atan2(e.clientY - rotateStart.value.y, e.clientX - rotateStart.value.x)
+  rotationAngle.value = currentAngle - rotateStart.value.angle
+
+  // Use RAF throttling for performance
+  if (animationFrameId) return
+  animationFrameId = requestAnimationFrame(() => {
+    if (!cachedBoundingBox.value) return
+
+    // Update selection box immediately
+    const box = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
+    if (box && boundingBox.value) {
+      // Set transform origin to center of the box (in screen coordinates)
+      const centerX = boundingBox.value.width / 2
+      const centerY = boundingBox.value.height / 2
+      box.style.transformOrigin = `${centerX}px ${centerY}px`
+
+      // Get current rotation and apply the delta
+      const currentRotation = getSelectionRotation()
+      const newRotation = currentRotation + rotationAngle.value
+
+      // Apply transform with rotation (selection box is already positioned in screen coords)
+      box.style.transform = `translate3d(${boundingBox.value.x}px, ${boundingBox.value.y}px, 0) rotate(${newRotation}rad)`
+    }
+
+    // Update all selected elements immediately
+    if (canvasService && cachedBoundingBox.value) {
+      updateElementRotation(selectedIds.value, rotationAngle.value)
+    }
+
+    animationFrameId = null
+  })
+}
+
+const stopRotate = () => {
+  if (!isRotating.value) return
+
+  // Cancel pending animation frame
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId)
+    animationFrameId = null
+  }
+
+  // Remove dragging class
+  const boxRef = selectedIds.value.length === 1 ? singleBoxRef.value : multiBoxRef.value
+  if (boxRef) {
+    boxRef.classList.remove('dragging')
+  }
+
+  // Apply rotation to store if there was a significant change
+  if (Math.abs(rotationAngle.value) > 0.01) {
+    applyRotationToStore(selectedIds.value, rotationAngle.value)
+    elementsStore.saveToLocal()
+
+    requestAnimationFrame(() => {
+      if (canvasService) {
+        resetElementsToFinalRotation(selectedIds.value)
+      }
+    })
+
+    // Update cached bounding box after rotation
+    cachedBoundingBox.value = calculateBoundingBox()
+  }
+
+  isRotating.value = false
+  rotationAngle.value = 0
+  document.removeEventListener('mousemove', onRotate)
+  document.removeEventListener('mouseup', stopRotate)
 }
 
 // 组件卸载时清理
@@ -570,6 +640,8 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', stopDrag)
   document.removeEventListener('mousemove', onResize)
   document.removeEventListener('mouseup', stopResize)
+  document.removeEventListener('mousemove', onRotate)
+  document.removeEventListener('mouseup', stopRotate)
 })
 
 </script>
@@ -645,5 +717,23 @@ onUnmounted(() => {
   bottom: -5px;
   right: -5px;
   cursor: nwse-resize;
+}
+
+.rotate-handle {
+  position: absolute;
+  bottom: -25px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 12px;
+  background: white;
+  border: 2px solid #4672EF;
+  border-radius: 50%;
+  cursor: grab;
+  z-index: 102;
+}
+
+.rotate-handle:active {
+  cursor: grabbing;
 }
 </style>

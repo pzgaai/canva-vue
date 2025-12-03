@@ -2,11 +2,13 @@
   <div
     class="image-element"
     :style="containerStyle"
-    @mousedown="handleMouseDown"
+    :data-element-id="element.id"
+    @mousedown="onMouseDown"
   >
     <img
       :src="element.src"
       :style="imageStyle"
+      :data-element-id="element.id"
       draggable="false"
     />
   </div>
@@ -17,6 +19,8 @@ import { computed } from 'vue'
 import type { ImageElement } from '@/cores/types/element'
 import { useElementDrag } from '@/composables/useElementDrag'
 import { useDragState } from '@/composables/useDragState'
+import { useElementsStore } from '@/stores/elements'
+import { useSelectionStore } from '@/stores/selection'
 
 const props = defineProps<{
   element: ImageElement
@@ -25,29 +29,45 @@ const props = defineProps<{
 // 使用拖拽 composable
 const { handleMouseDown, isDragging } = useElementDrag(props.element.id)
 const { getDragState } = useDragState()
+const elementsStore = useElementsStore()
+const selectionStore = useSelectionStore()
+
+// 包装一层，避免组合内子元素被直接拖拽 / 选中
+const onMouseDown = (e: MouseEvent) => {
+  const el = elementsStore.getElementById(props.element.id)
+  if (el && el.parentGroup) {
+    // 点击组合内图片时，选中其父组合，而不是图片本身
+    e.stopPropagation()
+    e.preventDefault()
+    selectionStore.selectElement(el.parentGroup)
+    return
+  }
+  handleMouseDown(e)
+}
 
 // 容器样式 - 使用 transform3d 启用 GPU 加速
 const containerStyle = computed(() => {
   // 检查是否在全局拖拽中（多选拖拽）
   const dragState = getDragState().value
   const isInGlobalDrag = dragState?.isDragging && dragState.elementIds.includes(props.element.id)
-  
+
   let x = props.element.x
   let y = props.element.y
-  
-  // 如果在全局拖拽中且不是自己发起的拖拽，应用拖拽偏移
+
+  // 在多选拖拽中，如果不是当前拖拽的元素，应用全局偏移
   if (isInGlobalDrag && !isDragging.value && dragState) {
     x += dragState.offset.x
     y += dragState.offset.y
   }
-  
+
   return {
     position: 'absolute' as const,
     left: '0',
     top: '0',
     width: `${props.element.width}px`,
     height: `${props.element.height}px`,
-    transform: `translate3d(${x}px, ${y}px, 0) rotate(${props.element.rotation || 0}deg)`,
+    transform: `translate3d(${x}px, ${y}px, 0) rotate(${props.element.rotation || 0}rad)`,
+    transformOrigin: 'center center',
     opacity: props.element.opacity,
     visibility: (props.element.visible ? 'visible' : 'hidden') as 'visible' | 'hidden',
     pointerEvents: (props.element.locked ? 'none' : 'auto') as 'none' | 'auto',
@@ -83,7 +103,6 @@ const imageStyle = computed(() => {
 
 <style scoped>
 .image-element {
-  transform-origin: top left;
   /* 拖拽时启用 GPU 加速 */
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
