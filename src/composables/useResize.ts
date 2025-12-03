@@ -2,6 +2,7 @@ import { useElementsStore } from '@/stores/elements'
 import { useCanvasStore } from '@/stores/canvas'
 import { CoordinateTransform } from '@/cores/viewport/CoordinateTransform'
 import type { CanvasService } from '@/services/canvas/CanvasService'
+import type { GroupElement } from '@/cores/types/element'
 
 export function useResize(canvasService: CanvasService | null | undefined) {
   const elementsStore = useElementsStore()
@@ -12,30 +13,58 @@ export function useResize(canvasService: CanvasService | null | undefined) {
     cachedBoundingBox: { x: number; y: number; width: number; height: number },
     w: number,
     h: number,
-    resizeHandle: string
+    resizeHandle: string,
+    initialPositions?: Map<string, { x: number; y: number; width: number; height: number }>
   ) => {
     const scaleX = w / cachedBoundingBox.width
     const scaleY = h / cachedBoundingBox.height
     const centerX = cachedBoundingBox.x + cachedBoundingBox.width / 2
     const centerY = cachedBoundingBox.y + cachedBoundingBox.height / 2
 
-    selectedIds.forEach(id => {
+    // 展开组合元素，获取所有需要更新的元素ID（包括子元素）
+    const getExpandedIds = (ids: string[]): string[] => {
+      const expanded = new Set<string>()
+      ids.forEach(id => {
+        const el = elementsStore.getElementById(id)
+        if (!el) return
+        expanded.add(id)
+        if (el.type === 'group') {
+          const groupEl = el as GroupElement
+          if (groupEl.children) {
+            groupEl.children.forEach(childId => expanded.add(childId))
+          }
+        }
+      })
+      return Array.from(expanded)
+    }
+
+    const expandedIds = getExpandedIds(selectedIds)
+    const isMulti = expandedIds.length > 1
+
+    expandedIds.forEach(id => {
       const el = elementsStore.getElementById(id)
       if (!el) return
 
+      // 使用初始位置（如果提供）或当前 Store 位置
+      const initialPos = initialPositions?.get(id)
+      const baseX = initialPos?.x ?? el.x
+      const baseY = initialPos?.y ?? el.y
+      const baseWidth = initialPos?.width ?? el.width
+      const baseHeight = initialPos?.height ?? el.height
+
       let newX, newY
-      if (selectedIds.length > 1) {
+      if (isMulti) {
         // Multi-element: scale from center
-        const relX = el.x + el.width / 2 - centerX
-        const relY = el.y + el.height / 2 - centerY
-        newX = centerX + relX * scaleX - el.width * scaleX / 2
-        newY = centerY + relY * scaleY - el.height * scaleY / 2
+        const relX = baseX + baseWidth / 2 - centerX
+        const relY = baseY + baseHeight / 2 - centerY
+        newX = centerX + relX * scaleX - baseWidth * scaleX / 2
+        newY = centerY + relY * scaleY - baseHeight * scaleY / 2
       } else {
         // Single element: scale from corner
-        newX = el.x
-        newY = el.y
-        if (resizeHandle.includes('l')) newX += el.width * (1 - scaleX)
-        if (resizeHandle.includes('t')) newY += el.height * (1 - scaleY)
+        newX = baseX
+        newY = baseY
+        if (resizeHandle.includes('l')) newX += baseWidth * (1 - scaleX)
+        if (resizeHandle.includes('t')) newY += baseHeight * (1 - scaleY)
       }
 
       if (el.type === 'image') {
@@ -43,16 +72,16 @@ export function useResize(canvasService: CanvasService | null | undefined) {
         if (imgEl) {
           imgEl.style.transform = `translate3d(${newX}px, ${newY}px, 0) rotate(${el.rotation || 0}rad)`
           imgEl.style.transformOrigin = 'center center'
-          imgEl.style.width = `${el.width * scaleX}px`
-          imgEl.style.height = `${el.height * scaleY}px`
+          imgEl.style.width = `${baseWidth * scaleX}px`
+          imgEl.style.height = `${baseHeight * scaleY}px`
         }
       } else if (el.type === 'text') {
         const textEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
         if (textEl) {
           textEl.style.transform = `translate3d(${newX}px, ${newY}px, 0) rotate(${el.rotation || 0}rad)`
           textEl.style.transformOrigin = 'center center'
-          textEl.style.width = `${el.width * scaleX}px`
-          textEl.style.height = `${el.height * scaleY}px`
+          textEl.style.width = `${baseWidth * scaleX}px`
+          textEl.style.height = `${baseHeight * scaleY}px`
         }
       } else {
         canvasService?.getRenderService().updateElementPosition(id, newX, newY)
@@ -159,10 +188,16 @@ export function useResize(canvasService: CanvasService | null | undefined) {
   ) => {
     const viewport = canvasStore.viewport
     
+    // 检查是否为组合元素（组合元素应该使用中心缩放模式）
+    const isGroup = selectedIds.length === 1 && selectedIds.some(id => {
+      const el = elementsStore.getElementById(id)
+      return el?.type === 'group'
+    })
+    
     // Calculate world coordinates position
     let worldX, worldY
-    if (selectedIds.length > 1) {
-      // Multi-element: center the selection box
+    if (selectedIds.length > 1 || isGroup) {
+      // Multi-element or group: center the selection box
       const centerX = cachedBoundingBox.x + cachedBoundingBox.width / 2
       const centerY = cachedBoundingBox.y + cachedBoundingBox.height / 2
       worldX = centerX - w / 2

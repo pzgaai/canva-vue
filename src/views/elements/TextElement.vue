@@ -22,7 +22,7 @@
 
 <script setup lang="ts">
 import { computed, ref, inject } from 'vue'
-import type { TextElement } from '@/cores/types/element'
+import type { TextElement, GroupElement } from '@/cores/types/element'
 import { useElementsStore } from '@/stores/elements'
 import { useSelectionStore } from '@/stores/selection'
 import { useDragState } from '@/composables/useDragState'
@@ -54,8 +54,6 @@ let draggedIds: string[] = []
 
 // 容器样式 - 使用 transform3d 启用 GPU 加速
 const containerStyle = computed(() => {
-  const isGrouped = !!props.element.parentGroup
-
   // 检查是否在全局拖拽中（多选拖拽）
   const dragState = getDragState().value
   const isInGlobalDrag = dragState?.isDragging && dragState.elementIds.includes(props.element.id)
@@ -79,7 +77,7 @@ const containerStyle = computed(() => {
     transformOrigin: 'center center',
     opacity: props.element.opacity,
     visibility: (props.element.visible ? 'visible' : 'hidden') as 'visible' | 'hidden',
-    pointerEvents: (isGrouped ? 'none' : 'auto') as 'none' | 'auto',
+    pointerEvents: 'auto' as const, // 始终允许接收事件，以便在 handleMouseDown 中处理组合情况
     zIndex: 9999, // 固定高 z-index 确保在所有层之上，能接收事件
     fontSize: `${props.element.fontSize}px`,
     color: props.element.color,
@@ -96,9 +94,52 @@ const handleMouseDown = (e: MouseEvent) => {
   elementRef.value = e.currentTarget as HTMLElement
 
   const el = elementsStore.getElementById(props.element.id)
-  // 如果是组合内子元素，点击时选中其父组合，并禁止单独拖拽
+  // 如果是组合内子元素，点击时选中其父组合，并启动组合拖拽
   if (el && el.parentGroup) {
-    selectionStore.selectElement(el.parentGroup)
+    // 阻止事件传播，防止触发画布点击事件
+    e.stopPropagation()
+    e.preventDefault()
+    
+    // 选中父组合
+    const parentGroupId = el.parentGroup
+    selectionStore.selectElement(parentGroupId)
+    
+    // 获取父组合元素及其所有子元素
+    const groupEl = elementsStore.getElementById(parentGroupId)
+    if (groupEl && groupEl.type === 'group') {
+      const groupChildren = (groupEl as GroupElement).children || []
+      const allGroupIds = [parentGroupId, ...groupChildren]
+      
+      // 计算组合的初始边界框
+      const groupElements = allGroupIds.map(id => elementsStore.getElementById(id)).filter(Boolean)
+      if (groupElements.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+        groupElements.forEach(el => {
+          minX = Math.min(minX, el.x)
+          minY = Math.min(minY, el.y)
+          maxX = Math.max(maxX, el.x + el.width)
+          maxY = Math.max(maxY, el.y + el.height)
+        })
+        initialBoundingBox = {
+          x: minX,
+          y: minY,
+          width: maxX - minX,
+          height: maxY - minY
+        }
+      }
+      
+      // 记录拖拽开始状态
+      dragStartPos.value = { x: e.clientX, y: e.clientY }
+      draggedIds = allGroupIds
+      hasMoved.value = false
+      
+      // 启动全局拖拽状态
+      startDrag(allGroupIds, initialBoundingBox)
+      
+      // 添加全局事件监听
+      document.addEventListener('mousemove', handleGroupDragMove)
+      document.addEventListener('mouseup', handleGroupDragUp)
+    }
     return
   }
 
@@ -227,8 +268,154 @@ const handleMouseUp = (e: MouseEvent) => {
   draggedIds = []
 }
 
+// 处理组合拖拽移动
+const handleGroupDragMove = (e: MouseEvent) => {
+  const screenDx = e.clientX - dragStartPos.value.x
+  const screenDy = e.clientY - dragStartPos.value.y
+  
+  // Convert to world coordinates
+  const viewport = canvasService?.getViewportService().getViewport()
+  const zoom = viewport?.zoom || 1
+  const worldDx = screenDx / zoom
+  const worldDy = screenDy / zoom
+  
+  // 移动超过 3px 才认为是拖拽
+  if (!hasMoved.value && (Math.abs(screenDx) > 3 || Math.abs(screenDy) > 3)) {
+    hasMoved.value = true
+    isDragging.value = true
+  }
+  
+  if (!hasMoved.value) return
+  
+  // 应用对齐吸附
+  let finalDx = worldDx
+  let finalDy = worldDy
+  
+  if (initialBoundingBox) {
+    const targetRect = {
+      x: initialBoundingBox.x + worldDx,
+      y: initialBoundingBox.y + worldDy,
+      width: initialBoundingBox.width,
+      height: initialBoundingBox.height
+    }
+    
+    const { dx: snapDx, dy: snapDy } = checkAlignment(targetRect, draggedIds)
+    finalDx += snapDx
+    finalDy += snapDy
+  }
+  
+  // 更新全局拖拽偏移
+  updateDragOffset({ x: finalDx, y: finalDy })
+  
+  // 使用 RAF 节流更新 DOM 元素位置
+  if (animationFrameId !== null) return
+  
+  animationFrameId = requestAnimationFrame(() => {
+    // 更新所有组合子元素的 DOM 位置
+    draggedIds.forEach(id => {
+      const el = elementsStore.getElementById(id)
+      if (!el) return
+      
+      if (el.type === 'text') {
+        const textEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
+        if (textEl) {
+          const elWorldX = el.x + finalDx
+          const elWorldY = el.y + finalDy
+          const rotation = el.rotation || 0
+          textEl.style.transform = `translate3d(${elWorldX}px, ${elWorldY}px, 0) rotate(${rotation}rad)`
+        }
+      } else if (el.type === 'image') {
+        const imgEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
+        if (imgEl) {
+          const elWorldX = el.x + finalDx
+          const elWorldY = el.y + finalDy
+          const rotation = el.rotation || 0
+          imgEl.style.transform = `translate3d(${elWorldX}px, ${elWorldY}px, 0) rotate(${rotation}rad)`
+        }
+      }
+    })
+    
+    // 同步更新 Canvas 元素位置（PIXI Graphics）
+    if (canvasService && draggedIds.length > 0) {
+      const updates = draggedIds.map(id => {
+        const el = elementsStore.getElementById(id)
+        if (!el) return null
+        return {
+          id,
+          x: el.x + finalDx,
+          y: el.y + finalDy
+        }
+      }).filter(Boolean) as Array<{ id: string; x: number; y: number }>
+      
+      canvasService.batchUpdatePositions(updates)
+    }
+    
+    animationFrameId = null
+  })
+}
+
+// 处理组合拖拽结束
+const handleGroupDragUp = (e: MouseEvent) => {
+  document.removeEventListener('mousemove', handleGroupDragMove)
+  document.removeEventListener('mouseup', handleGroupDragUp)
+  
+  // 取消待处理的动画帧
+  if (animationFrameId !== null) {
+    cancelAnimationFrame(animationFrameId)
+    animationFrameId = null
+  }
+  
+  if (hasMoved.value) {
+    const screenDx = e.clientX - dragStartPos.value.x
+    const screenDy = e.clientY - dragStartPos.value.y
+    
+    // Convert to world coordinates
+    const viewport = canvasService?.getViewportService().getViewport()
+    const zoom = viewport?.zoom || 1
+    const worldDx = screenDx / zoom
+    const worldDy = screenDy / zoom
+    
+    // 应用对齐吸附
+    let finalDx = worldDx
+    let finalDy = worldDy
+    
+    if (initialBoundingBox) {
+      const targetRect = {
+        x: initialBoundingBox.x + worldDx,
+        y: initialBoundingBox.y + worldDy,
+        width: initialBoundingBox.width,
+        height: initialBoundingBox.height
+      }
+      
+      const { dx: snapDx, dy: snapDy } = checkAlignment(targetRect, draggedIds)
+      finalDx += snapDx
+      finalDy += snapDy
+    }
+    
+    // 更新 Store
+    elementsStore.moveElements(draggedIds, finalDx, finalDy)
+    elementsStore.saveToLocal()
+  }
+  
+  // 清理状态
+  endDrag()
+  clearAlignment()
+  isDragging.value = false
+  hasMoved.value = false
+  dragStartPos.value = { x: 0, y: 0 }
+  initialBoundingBox = null
+  draggedIds = []
+}
+
 // 双击进入编辑模式
-const handleDoubleClick = () => {
+const handleDoubleClick = (e: MouseEvent) => {
+  const el = elementsStore.getElementById(props.element.id)
+  // 如果是组合内子元素，双击时不进入编辑模式
+  if (el && el.parentGroup) {
+    e.stopPropagation()
+    e.preventDefault()
+    return
+  }
   emit('dblclick', props.element.id)
 }
 </script>

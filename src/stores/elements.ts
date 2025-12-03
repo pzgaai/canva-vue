@@ -322,14 +322,68 @@ export const useElementsStore = defineStore('elements', {
       // 获取选中的元素
       const selectedElements = this.elements.filter(el => selectionStore.selectedIds.includes(el.id))
 
-      // 深拷贝元素，移除ID和时间戳
-      this.clipboard = selectedElements.map(el => {
-        // 直接深拷贝整个元素，后续创建新元素时会覆盖ID和时间戳
-        const copy = JSON.parse(JSON.stringify(el))
+      // 展开组合元素，收集所有需要复制的元素（包括组合的子元素）
+      const elementsToCopy: Array<{ element: AnyElement; originalId: string; isGroup: boolean }> = []
+      const processedIds = new Set<string>()
+      
+      selectedElements.forEach(el => {
+        if (processedIds.has(el.id)) return
+        
+        if (el.type === 'group') {
+          // 组合元素：先添加组合本身，再添加所有子元素
+          elementsToCopy.push({ element: el, originalId: el.id, isGroup: true })
+          processedIds.add(el.id)
+          
+          const groupEl = el as GroupElement
+          if (groupEl.children) {
+            groupEl.children.forEach(childId => {
+              if (!processedIds.has(childId)) {
+                const childEl = this.getElementById(childId)
+                if (childEl) {
+                  elementsToCopy.push({ element: childEl, originalId: childId, isGroup: false })
+                  processedIds.add(childId)
+                }
+              }
+            })
+          }
+        } else {
+          // 非组合元素：直接添加（但跳过已经是组合子元素的元素）
+          if (!el.parentGroup) {
+            elementsToCopy.push({ element: el, originalId: el.id, isGroup: false })
+            processedIds.add(el.id)
+          }
+        }
+      })
+
+      // 深拷贝元素，移除ID和时间戳，但保留原始ID用于匹配
+      // 同时记录每个元素所属的组合ID（如果有）
+      const groupIdMap = new Map<string, string>() // 子元素ID -> 组合ID
+      selectedElements.forEach(el => {
+        if (el.type === 'group') {
+          const groupEl = el as GroupElement
+          if (groupEl.children) {
+            groupEl.children.forEach(childId => {
+              groupIdMap.set(childId, el.id)
+            })
+          }
+        }
+      })
+      
+      this.clipboard = elementsToCopy.map(({ element, originalId, isGroup }) => {
+        const copy = JSON.parse(JSON.stringify(element)) as ClipboardElement
         // 删除不需要的属性
         delete copy.id
         delete copy.createdAt
         delete copy.updatedAt
+        delete copy.parentGroup // 清除 parentGroup，粘贴时会重新设置
+        // 保存原始ID用于匹配（临时属性，不会保存到最终元素）
+        copy.__originalId = originalId
+        copy.__isGroup = isGroup
+        // 保存所属组合ID（如果有）
+        const parentGroupId = groupIdMap.get(originalId)
+        if (parentGroupId) {
+          copy.__parentGroupId = parentGroupId
+        }
         return copy
       })
     },
@@ -340,55 +394,211 @@ export const useElementsStore = defineStore('elements', {
 
       const selectionStore = useSelectionStore()
       const newElementIds: string[] = []
+      const idMapping = new Map<string, string>() // 旧ID -> 新ID的映射
+      const offset = 10 // 偏移量
 
-      // 为每个粘贴的元素生成新ID并调整位置
-      this.clipboard.forEach((clipboardEl, index) => {
+      // 第一步：分离组合元素、子元素和独立元素
+      const groupElements: Array<{ clipboardEl: ClipboardElement; originalId: string; index: number }> = []
+      const childElements: Array<{ clipboardEl: ClipboardElement; originalId: string; parentGroupId: string }> = []
+      const independentElements: Array<{ clipboardEl: ClipboardElement; originalId: string; index: number }> = []
+      let groupIndex = 0
+      let independentIndex = 0
+      
+      this.clipboard.forEach((clipboardEl) => {
+        const typedClipboardEl = clipboardEl as ClipboardElement
+        const isGroup = typedClipboardEl.__isGroup === true
+        const originalId = typedClipboardEl.__originalId
+        const parentGroupId = typedClipboardEl.__parentGroupId
+        
+        if (isGroup) {
+          // 组合元素稍后处理
+          groupElements.push({ clipboardEl: typedClipboardEl, originalId, index: groupIndex })
+          groupIndex++
+        } else if (parentGroupId) {
+          // 组合的子元素：稍后处理，需要根据组合的偏移量计算位置
+          childElements.push({ clipboardEl: typedClipboardEl, originalId, parentGroupId })
+        } else {
+          // 独立的非组合元素：立即创建
+          independentElements.push({ clipboardEl: typedClipboardEl, originalId, index: independentIndex })
+          independentIndex++
+        }
+      })
+      
+      // 第二步：先创建独立的非组合元素
+      independentElements.forEach(({ clipboardEl, originalId, index }) => {
         const id = this.generateId()
-        const offset = 10 // 偏移量
+        idMapping.set(originalId, id)
 
         // 计算新位置
         let newX: number;
         let newY: number;
 
         if (position) {
-          // 如果提供了位置，使用该位置，多个元素时依次偏移
           newX = position.x + offset * index;
           newY = position.y + offset * index;
         } else {
-          // 否则使用原位置偏移
           newX = clipboardEl.x + offset * (index + 1);
           newY = clipboardEl.y + offset * (index + 1);
         }
 
-        // 创建新元素
-        let newElement: AnyElement;
+        const newElement: AnyElement = {
+          ...clipboardEl,
+          id,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          x: newX,
+          y: newY,
+        } as AnyElement
+        
+        // 删除临时属性
+        delete (newElement as ClipboardElement).__originalId
+        delete (newElement as ClipboardElement).__isGroup
+        delete (newElement as ClipboardElement).__parentGroupId
 
-        if (clipboardEl.type === 'group') {
-          // 组合元素需要确保有 children 属性，使用类型断言
-          const groupClipboardEl = clipboardEl as Omit<GroupElement, 'id' | 'createdAt' | 'updatedAt'>;
-          newElement = {
-            ...groupClipboardEl,
-            id,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            x: newX,
-            y: newY,
-            children: groupClipboardEl.children || [],
-          } as GroupElement;
+        this.elements.push(newElement)
+      })
+      
+      // 第三步：计算组合的偏移量（但不创建组合元素）
+      const groupOffsetMap = new Map<string, { originalX: number; originalY: number; offsetX: number; offsetY: number }>()
+      groupElements.forEach(({ clipboardEl, originalId }) => {
+        // 计算组合的新位置
+        let newX: number;
+        let newY: number;
+
+        if (position) {
+          newX = position.x + offset * index;
+          newY = position.y + offset * index;
         } else {
-          // 非组合元素
-          newElement = {
+          newX = clipboardEl.x + offset * (index + 1);
+          newY = clipboardEl.y + offset * (index + 1);
+        }
+
+        // 计算组合的偏移量（用于调整子元素位置）
+        const offsetX = newX - clipboardEl.x
+        const offsetY = newY - clipboardEl.y
+        groupOffsetMap.set(originalId, {
+          originalX: clipboardEl.x,
+          originalY: clipboardEl.y,
+          offsetX,
+          offsetY
+        })
+      })
+      
+      // 第四步：创建组合的子元素，保持相对位置
+      childElements.forEach(({ clipboardEl, originalId, parentGroupId }) => {
+        const id = this.generateId()
+        idMapping.set(originalId, id)
+        
+        // 获取组合的偏移量
+        const groupOffset = groupOffsetMap.get(parentGroupId)
+        if (!groupOffset) {
+          // 如果找不到组合偏移量，使用默认偏移
+          const newElement: AnyElement = {
             ...clipboardEl,
             id,
             createdAt: Date.now(),
             updatedAt: Date.now(),
-            x: newX,
-            y: newY,
-          } as AnyElement;
+            x: clipboardEl.x + offset,
+            y: clipboardEl.y + offset,
+          } as AnyElement
+          
+          delete (newElement as ClipboardElement).__originalId
+          delete (newElement as ClipboardElement).__isGroup
+          delete (newElement as ClipboardElement).__parentGroupId
+          
+          this.elements.push(newElement)
+          return
+        }
+        
+        // 计算子元素的新位置：原位置 + 组合偏移量
+        const newX = clipboardEl.x + groupOffset.offsetX
+        const newY = clipboardEl.y + groupOffset.offsetY
+        
+        const newElement: AnyElement = {
+          ...clipboardEl,
+          id,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          x: newX,
+          y: newY,
+        } as AnyElement
+        
+        // 删除临时属性
+        delete (newElement as ClipboardElement).__originalId
+        delete (newElement as ClipboardElement).__isGroup
+        delete (newElement as ClipboardElement).__parentGroupId
+        
+        this.elements.push(newElement)
+      })
+      
+      // 第五步：创建组合元素，此时子元素已经创建，可以正确映射ID
+      groupElements.forEach(({ clipboardEl, originalId }) => {
+        const groupClipboardEl = clipboardEl as Omit<GroupElement, 'id' | 'createdAt' | 'updatedAt'>
+        const groupId = this.generateId()
+        idMapping.set(originalId, groupId)
+        
+        // 计算组合的新位置（使用之前计算的偏移量）
+        const groupOffset = groupOffsetMap.get(originalId)!
+        const newX = groupOffset.originalX + groupOffset.offsetX
+        const newY = groupOffset.originalY + groupOffset.offsetY
+
+        // 映射子元素ID：将旧的子元素ID映射为新的ID
+        const newChildrenIds: string[] = []
+        if (groupClipboardEl.children && Array.isArray(groupClipboardEl.children)) {
+          groupClipboardEl.children.forEach((oldChildId: string) => {
+            const newChildId = idMapping.get(oldChildId)
+            if (newChildId) {
+              newChildrenIds.push(newChildId)
+              // 更新子元素的 parentGroup
+              const childEl = this.getElementById(newChildId)
+              if (childEl) {
+                childEl.parentGroup = groupId
+              }
+            }
+          })
         }
 
-        this.elements.push(newElement)
-        newElementIds.push(id)
+        const newGroupElement: GroupElement = {
+          ...groupClipboardEl,
+          id: groupId,
+          type: 'group',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          x: newX,
+          y: newY,
+          children: newChildrenIds,
+        } as GroupElement
+        
+        // 删除临时属性
+        delete (newGroupElement as ClipboardElement).__originalId
+        delete (newGroupElement as ClipboardElement).__isGroup
+
+        this.elements.push(newGroupElement)
+        newElementIds.push(groupId)
+      })
+
+      // 收集所有新创建的元素ID（只包括顶层元素，不包括组合的子元素）
+      this.clipboard.forEach((clipboardEl) => {
+        const typedClipboardEl = clipboardEl as ClipboardElement
+        const isGroup = typedClipboardEl.__isGroup === true
+        const originalId = typedClipboardEl.__originalId
+        
+        if (isGroup) {
+          // 组合元素ID已经在上面添加了
+          const groupId = idMapping.get(originalId)
+          if (groupId && !newElementIds.includes(groupId)) {
+            newElementIds.push(groupId)
+          }
+        } else {
+          // 非组合元素：只添加顶层元素（不是组合子元素的）
+          const newId = idMapping.get(originalId)
+          if (newId) {
+            const el = this.getElementById(newId)
+            if (el && !el.parentGroup) {
+              newElementIds.push(newId)
+            }
+          }
+        }
       })
 
       // 创建新数组引用，触发 watch 监听，确保画布重新渲染
@@ -398,7 +608,7 @@ export const useElementsStore = defineStore('elements', {
       this.recordSnapshot()
       // 保存到本地
       this.saveToLocal()
-      // 自动选中新粘贴的元素
+      // 自动选中新粘贴的元素（只选中顶层元素，不包括组合的子元素）
       selectionStore.selectedIds = newElementIds
     },
 

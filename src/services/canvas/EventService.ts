@@ -8,7 +8,7 @@
  * 4. 支持无限画布的坐标转换
  */
 import { Application, Graphics, FederatedPointerEvent, Container } from 'pixi.js'
-import type { AnyElement } from '@/cores/types/element'
+import type { AnyElement, GroupElement } from '@/cores/types/element'
 import { useDragState } from '@/composables/useDragState'
 import { useAlignment } from '@/composables/useAlignment'
 import type { ViewportService } from './ViewportService'
@@ -59,6 +59,8 @@ export class EventService {
   private worldContainer: Container | null = null
   private initialBoundingBox: { x: number; y: number; width: number; height: number } | null = null
   private draggedIds: string[] = []
+  private initialElementPositions: Map<string, { x: number; y: number }> = new Map()
+  private dragAnimationFrameId: number | null = null
 
   constructor() { }
 
@@ -125,12 +127,6 @@ export class EventService {
    * 统一处理鼠标按下事件
    */
   private handlePointerDown(event: FederatedPointerEvent): void {
-    // 只处理左键点击,右键留给上下文菜单
-    // 0-左键、1-中键、2-右键、 3-浏览器后退键、4-浏览器前进键
-    if (event.button !== 0) {
-      return
-    }
-
     const currentTool = this.handlers.getCurrentTool?.()
 
     // 如果是平移工具，不处理元素交互
@@ -177,7 +173,7 @@ export class EventService {
 
       // 防御性检查：确保 draggedIds 不为空
       if (draggedIds.length === 0) {
-        console.warn('[对齐调试] draggedIds 为空，强制添加当前元素')
+        // console.warn('[对齐调试] draggedIds 为空，强制添加当前元素')
         draggedIds = [elementId]
       }
 
@@ -185,7 +181,7 @@ export class EventService {
       const draggedElements = draggedIds.map(id => allElements.find(el => el.id === id)).filter(el => el != null) as AnyElement[]
 
       if (draggedElements.length === 0) {
-        console.warn('[对齐调试] 未找到拖拽元素！', { draggedIds, allElementsCount: allElements.length })
+        // console.warn('[对齐调试] 未找到拖拽元素！', { draggedIds, allElementsCount: allElements.length })
       }
 
       let initialBoundingBox = null
@@ -209,16 +205,43 @@ export class EventService {
       this.draggedIds = draggedIds
       this.initialBoundingBox = initialBoundingBox
 
-      console.log('[对齐调试] 开始拖拽:', {
-        elementId,
-        draggedIds,
-        initialBoundingBox,
-        selectedIds,
-        allElementsCount: allElements.length,
-        allElementIds: allElements.map(el => el.id),
-        draggedElementsFound: draggedElements.length,
-        draggedElementsIds: draggedElements.map(el => el.id)
+      // 展开组合元素，获取所有需要更新的元素ID（包括子元素）
+      const getExpandedIds = (ids: string[]): string[] => {
+        const expanded = new Set<string>()
+        ids.forEach(id => {
+          const el = allElements.find(e => e.id === id)
+          if (!el) return
+          expanded.add(id)
+          if (el.type === 'group') {
+            const groupEl = el as GroupElement
+            if (groupEl.children) {
+              groupEl.children.forEach(childId => expanded.add(childId))
+            }
+          }
+        })
+        return Array.from(expanded)
+      }
+
+      // 保存所有元素的初始位置（包括组合的子元素）
+      this.initialElementPositions.clear()
+      const expandedIds = getExpandedIds(draggedIds)
+      expandedIds.forEach(id => {
+        const el = allElements.find(e => e.id === id)
+        if (el) {
+          this.initialElementPositions.set(id, { x: el.x, y: el.y })
+        }
       })
+
+      // console.log('[对齐调试] 开始拖拽:', {
+      //   elementId,
+      //   draggedIds,
+      //   initialBoundingBox,
+      //   selectedIds,
+      //   allElementsCount: allElements.length,
+      //   allElementIds: allElements.map(el => el.id),
+      //   draggedElementsFound: draggedElements.length,
+      //   draggedElementsIds: draggedElements.map(el => el.id)
+      // })
 
       // 启动全局拖拽状态
       this.dragState.startDrag(draggedIds, initialBoundingBox)
@@ -234,7 +257,7 @@ export class EventService {
       }
     }
   }  /**
-   * 统一处理鼠标移动事件 
+   * 统一处理鼠标移动事件
    */
   private handlePointerMove(event: FederatedPointerEvent): void {
     const worldPos = this.screenToWorld(event.global.x, event.global.y)
@@ -256,7 +279,7 @@ export class EventService {
         const { dx: snapDx, dy: snapDy } = this.alignment.checkAlignment(targetRect, this.draggedIds)
 
         if (snapDx !== 0 || snapDy !== 0) {
-          console.log('[对齐调试] 检测到吸附:', { snapDx, snapDy, targetRect, draggedIds: this.draggedIds })
+          // console.log('[对齐调试] 检测到吸附:', { snapDx, snapDy, targetRect, draggedIds: this.draggedIds })
         }
 
         dx += snapDx
@@ -276,35 +299,69 @@ export class EventService {
         // 实时更新元素位置（拖拽预览）
         const allElements = this.handlers.getAllElements?.()
         if (allElements && this.worldContainer) {
-          if (isMultiSelect && selectedIds) {
-            // 多选拖拽：更新所有选中元素的视觉位置
-            selectedIds.forEach(id => {
+          // 展开组合元素，获取所有需要更新的元素ID（包括子元素）
+          const getExpandedIds = (ids: string[]): string[] => {
+            const expanded = new Set<string>()
+            ids.forEach(id => {
+              const el = allElements.find(e => e.id === id)
+              if (!el) return
+              expanded.add(id)
+              if (el.type === 'group') {
+                const groupEl = el as GroupElement
+                if (groupEl.children) {
+                  groupEl.children.forEach(childId => expanded.add(childId))
+                }
+              }
+            })
+            return Array.from(expanded)
+          }
+
+          // 确定要更新的元素ID列表
+          const idsToUpdate = isMultiSelect && selectedIds
+            ? getExpandedIds(selectedIds)
+            : getExpandedIds([this.dragTargetId])
+
+          // 使用 RAF 节流更新元素位置
+          if (this.dragAnimationFrameId !== null) {
+            return // 已有待处理的帧，跳过
+          }
+
+          this.dragAnimationFrameId = requestAnimationFrame(() => {
+            // 更新所有需要移动的元素（包括组合的子元素）
+            idsToUpdate.forEach(id => {
+              const initialPos = this.initialElementPositions.get(id)
+              if (!initialPos) return
+
               const element = allElements.find(el => el.id === id)
-              if (element && element.type === 'shape') {
-                // 从 worldContainer 中查找图形
+              if (!element) return
+
+              // 计算新位置（使用初始位置 + 偏移量）
+              const newX = initialPos.x + dx
+              const newY = initialPos.y + dy
+
+              // 更新 PIXI Graphics（shape 元素）
+              if (element.type === 'shape') {
                 const graphic = this.worldContainer!.children.find(
                   (child) => this.getElementIdByGraphic?.(child as Graphics) === id
                 ) as Graphics
                 if (graphic) {
-                  graphic.x = element.x + dx
-                  graphic.y = element.y + dy
+                  // Convert top-left position to center position for PIXI graphics
+                  graphic.x = newX + graphic.pivot.x
+                  graphic.y = newY + graphic.pivot.y
+                }
+              }
+              // 更新 DOM 元素（文本、图片）的位置
+              else if (element.type === 'text' || element.type === 'image') {
+                const domEl = document.querySelector(`[data-element-id="${id}"]`) as HTMLElement
+                if (domEl) {
+                  const rotation = element.rotation || 0
+                  domEl.style.transform = `translate3d(${newX}px, ${newY}px, 0) rotate(${rotation}rad)`
                 }
               }
             })
-          } else {
-            // 单选拖拽：更新当前元素的视觉位置
-            const element = allElements.find(el => el.id === this.dragTargetId)
-            if (element && element.type === 'shape') {
-              // 从 worldContainer 中查找图形
-              const graphic = this.worldContainer!.children.find(
-                (child) => this.getElementIdByGraphic?.(child as Graphics) === this.dragTargetId
-              ) as Graphics
-              if (graphic) {
-                graphic.x = element.x + dx
-                graphic.y = element.y + dy
-              }
-            }
-          }
+
+            this.dragAnimationFrameId = null
+          })
         }
       }
       return
@@ -351,6 +408,12 @@ export class EventService {
         }
       }
 
+      // 取消待处理的动画帧
+      if (this.dragAnimationFrameId !== null) {
+        cancelAnimationFrame(this.dragAnimationFrameId)
+        this.dragAnimationFrameId = null
+      }
+
       // 结束全局拖拽状态
       this.dragState.endDrag()
       this.alignment.clearAlignment()
@@ -359,6 +422,7 @@ export class EventService {
       this.dragTargetId = null
       this.initialBoundingBox = null
       this.draggedIds = []
+      this.initialElementPositions.clear()
       return
     }
 
@@ -439,3 +503,4 @@ export class EventService {
     this.handlers = {}
   }
 }
+
