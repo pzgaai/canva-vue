@@ -87,7 +87,7 @@ export function useCanvas() {
         }
       },
       // 创建元素事件
-      onToolCreate: (x: number, y: number, tool: string) => {
+      onElementCreate: (x: number, y: number, tool: string) => {
         const pos = canvasService.calculateCreatePosition(x, y, tool as ToolType)
         const id = createElement(pos.x, pos.y, pos.width, pos.height, tool as ToolType)
         // 创建后自动切换回选择工具
