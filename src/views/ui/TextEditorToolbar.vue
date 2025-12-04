@@ -4,7 +4,7 @@
 -->
 <template>
   <div
-    v-if="editor && isEditing"
+    v-if="editor && isEditing && !isRotating"
     class="text-toolbar"
     :style="toolbarStyle"
     @mousedown.stop
@@ -196,6 +196,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useCanvasStore } from '@/stores/canvas'
+import { useDragState } from '@/composables/useDragState'
 
 const props = defineProps<{
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -207,6 +208,12 @@ const props = defineProps<{
 }>()
 
 const canvasStore = useCanvasStore()
+const { getRotateState } = useDragState()
+
+// 监听旋转状态
+const isRotating = computed(() => {
+  return getRotateState().value
+})
 
 // Popover 可见性控制
 const textColorVisible = ref(false)

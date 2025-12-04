@@ -12,6 +12,9 @@ const globalDragState = ref<{
   initialBoundingBox: { x: number; y: number; width: number; height: number } | null
 } | null>(null)
 
+// 全局旋转状态
+const globalRotateState = ref(false)
+
 export function useDragState() {
   /**
    * 开始拖拽
@@ -52,10 +55,34 @@ export function useDragState() {
     return globalDragState
   }
 
+  /**
+   * 开始旋转
+   */
+  const startRotate = () => {
+    globalRotateState.value = true
+  }
+
+  /**
+   * 结束旋转
+   */
+  const endRotate = () => {
+    globalRotateState.value = false
+  }
+
+  /**
+   * 获取当前旋转状态
+   */
+  const getRotateState = () => {
+    return globalRotateState
+  }
+
   return {
     startDrag,
     updateDragOffset,
     endDrag,
-    getDragState
+    getDragState,
+    startRotate,
+    endRotate,
+    getRotateState
   }
 }

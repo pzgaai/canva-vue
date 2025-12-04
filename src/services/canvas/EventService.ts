@@ -19,7 +19,7 @@ import type { ViewportService } from './ViewportService'
  */
 export interface EventHandlers {
   // 元素创建
-  onElementCreate?: (elementData: Partial<AnyElement>) => void
+  onElementCreate?: (x: number, y: number, tool: string) => string | void
   // 元素选择
   onElementSelect?: (elementId: string) => void
   // 元素移动
@@ -31,7 +31,6 @@ export interface EventHandlers {
   // 选择变更
   onSelectionChange?: (elementIds: string[]) => void
   onCanvasClick?: () => void
-  onToolCreate?: (x: number, y: number, tool: string) => string | void
   onTextEdit?: (elementId: string) => void
   getCurrentTool?: () => string
   getSelectedIds?: () => string[]
@@ -256,7 +255,9 @@ export class EventService {
         this.worldContainer.addChild(this.selectionBox)
       }
     }
-  }  /**
+  }
+
+  /**
    * 统一处理鼠标移动事件
    */
   private handlePointerMove(event: FederatedPointerEvent): void {
@@ -450,8 +451,8 @@ export class EventService {
         // 点击：根据工具类型处理
         if (currentTool === 'rectangle' || currentTool === 'circle' || currentTool === 'triangle' || currentTool === 'text') {
           // 绘图工具：创建元素（使用世界坐标）
-          if (this.handlers.onToolCreate) {
-            const elementId = this.handlers.onToolCreate(worldPos.x, worldPos.y, currentTool)
+          if (this.handlers.onElementCreate) {
+            const elementId = this.handlers.onElementCreate(worldPos.x, worldPos.y, currentTool)
             console.log(`创建${currentTool}元素于 (${worldPos.x}, ${worldPos.y})`)
 
             // 如果是文本工具且返回了元素ID，触发文本编辑

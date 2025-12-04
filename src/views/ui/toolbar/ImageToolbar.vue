@@ -1,7 +1,7 @@
 <template>
   <!-- 只在选中图片元素时显示 -->
   <div
-    v-if="selectedImage && !selectionStore.isMultiSelect && currentTool === 'select' && !isDragging"
+    v-if="selectedImage && !selectionStore.isMultiSelect && currentTool === 'select' && !isDragging && !isRotating"
     class="image-toolbar"
     :style="toolbarStyle"
     @mousedown.stop
@@ -136,12 +136,17 @@ import type { ImageElement, SimpleFilterType } from '@/cores/types/element'
 const elementsStore = useElementsStore()
 const selectionStore = useSelectionStore()
 const canvasStore = useCanvasStore()
-const { getDragState } = useDragState()
+const { getDragState, getRotateState } = useDragState()
 
 // 监听拖拽状态
 const isDragging = computed(() => {
   const dragState = getDragState().value
   return dragState?.isDragging || false
+})
+
+// 监听旋转状态
+const isRotating = computed(() => {
+  return getRotateState().value
 })
 
 // 当前工具
@@ -171,25 +176,36 @@ const worldToScreen = (worldX: number, worldY: number) => {
   return { x: screenX, y: screenY }
 }
 
-// 计算工具栏位置（显示在元素上方，使用屏幕坐标）
+// 计算工具栏位置（使用屏幕坐标）
 const toolbarStyle = computed(() => {
   if (!selectedImage.value) return {}
 
   const element = selectedImage.value
   const toolbarHeight = 80 // 工具栏高度
   const padding = 12
+  const rotateHandleOffset = 25 // 旋转按钮在元素底部下方的距离
+  const topThreshold = toolbarHeight + padding + 20 // 顶部安全距离
 
   // 转换为屏幕坐标
   const topLeft = worldToScreen(element.x, element.y)
   const topRight = worldToScreen(element.x + element.width, element.y)
+  const bottomRight = worldToScreen(element.x + element.width, element.y + element.height)
   
-  // 工具栏居中显示在元素上方
+  // 工具栏居中显示在元素上方或下方
   const centerX = (topLeft.x + topRight.x) / 2
+
+  // 判断元素是否在画布顶部附近
+  const isNearTop = topLeft.y < topThreshold
+
+  // 如果元素在顶部，工具栏显示在下方（避开旋转按钮）；否则显示在上方
+  const topPosition = isNearTop
+    ? bottomRight.y + rotateHandleOffset + padding + 8 // 旋转按钮下方额外留8px间距
+    : topLeft.y - toolbarHeight - padding
 
   return {
     position: 'fixed' as const,
     left: `${centerX}px`,
-    top: `${topLeft.y - toolbarHeight - padding}px`,
+    top: `${topPosition}px`,
     transform: 'translateX(-50%)',
     zIndex: 10000
   }

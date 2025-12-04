@@ -70,7 +70,7 @@ const canvasStore = useCanvasStore()
 // 注入 canvasService
 const canvasService = inject<CanvasService>('canvasService')
 const { syncDragPosition } = canvasService ? useDragSync(canvasService) : { syncDragPosition: () => {} }
-const { getDragState, startDrag: startGlobalDrag, updateDragOffset: updateGlobalDragOffset, endDrag: endGlobalDrag } = useDragState()
+const { getDragState, startDrag: startGlobalDrag, updateDragOffset: updateGlobalDragOffset, endDrag: endGlobalDrag, startRotate: startGlobalRotate, endRotate: endGlobalRotate, getRotateState } = useDragState()
 const { updateElementRotation, applyRotationToStore, resetElementsToFinalRotation } = useRotate(canvasService || null)
 const { updateElementsResize, applyResizeToStore, resetGraphicsAfterResize, updateSelectionBox } = useResize(canvasService || null)
 const { checkAlignment, clearAlignment } = useAlignment()
@@ -78,7 +78,6 @@ const { checkAlignment, clearAlignment } = useAlignment()
 const selectedIds = computed(() => selectionStore.selectedIds)
 const isDragging = ref(false)
 const isResizing = ref(false)
-const isRotating = ref(false)
 const dragStartPos = ref({ x: 0, y: 0 })
 const resizeStart = ref({ x: 0, y: 0, w: 0, h: 0 })
 const rotateStart = ref({ x: 0, y: 0, angle: 0 })
@@ -609,7 +608,7 @@ const stopResize = () => {
 
 const startRotate = (e: MouseEvent) => {
   if (!cachedBoundingBox.value) return
-  isRotating.value = true
+  startGlobalRotate()
 
   // Calculate center in world coordinates
   const worldCenterX = cachedBoundingBox.value.x + cachedBoundingBox.value.width / 2
@@ -645,7 +644,8 @@ const startRotate = (e: MouseEvent) => {
 }
 
 const onRotate = (e: MouseEvent) => {
-  if (!isRotating.value || !cachedBoundingBox.value) return
+  const rotateState = getRotateState()
+  if (!rotateState.value || !cachedBoundingBox.value) return
 
   // Calculate current angle from screen center to mouse position
   const currentAngle = Math.atan2(e.clientY - rotateStart.value.y, e.clientX - rotateStart.value.x)
@@ -682,7 +682,8 @@ const onRotate = (e: MouseEvent) => {
 }
 
 const stopRotate = () => {
-  if (!isRotating.value) return
+  const rotateState = getRotateState()
+  if (!rotateState.value) return
 
   // Cancel pending animation frame
   if (animationFrameId) {
@@ -723,7 +724,7 @@ const stopRotate = () => {
     cachedBoundingBox.value = calculateBoundingBox()
   }
 
-  isRotating.value = false
+  endGlobalRotate()
   rotationAngle.value = 0
   document.removeEventListener('mousemove', onRotate)
   document.removeEventListener('mouseup', stopRotate)

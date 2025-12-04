@@ -1,7 +1,7 @@
 <template>
   <!-- 单个形状元素样式编辑工具栏 -->
   <div
-    v-if="selectedElement && selectedElement.type === 'shape' && !selectionStore.isMultiSelect && (currentTool === 'select') && !isDragging"
+    v-if="selectedElement && selectedElement.type === 'shape' && !selectionStore.isMultiSelect && (currentTool === 'select') && !isDragging && !isRotating"
     class="floating-toolbar"
     :style="toolbarStyle"
     @mousedown.stop
@@ -98,7 +98,7 @@
 
   <!-- 多选/组合操作浮动工具栏 -->
   <div
-    v-else-if="(selectionStore.isMultiSelect || isGroupSelected) && currentTool === 'select' && !isDragging"
+    v-else-if="(selectionStore.isMultiSelect || isGroupSelected) && currentTool === 'select' && !isDragging && !isRotating"
     class="floating-toolbar"
     :style="toolbarStyle"
     @mousedown.stop
@@ -138,7 +138,7 @@ import { Message } from '@arco-design/web-vue'
 const selectionStore = useSelectionStore()
 const elementsStore = useElementsStore()
 const canvasStore = useCanvasStore()
-const { getDragState } = useDragState()
+const { getDragState, getRotateState } = useDragState()
 const canvasService = inject<CanvasService>('canvasService')
 const groupService = new GroupService()
 
@@ -146,6 +146,11 @@ const groupService = new GroupService()
 const isDragging = computed(() => {
   const dragState = getDragState().value
   return dragState?.isDragging || false
+})
+
+// 监听旋转状态
+const isRotating = computed(() => {
+  return getRotateState().value
 })
 
 // 预设颜色
@@ -198,7 +203,7 @@ const isGroupSelected = computed(() => {
 // 当前工具
 const currentTool = computed(() => canvasStore.currentTool)
 
-// 计算工具栏位置（显示在元素上方，使用屏幕坐标）
+// 计算工具栏位置（使用屏幕坐标）
 const toolbarStyle = computed(() => {
   if (!selectedElement.value) return {}
 
@@ -229,10 +234,20 @@ const toolbarStyle = computed(() => {
 
   const toolbarHeight = 44
   const padding = 12
+  const rotateHandleOffset = 25 // 旋转按钮在元素底部下方的距离
+  const topThreshold = toolbarHeight + padding + 20 // 顶部安全距离
+
+  // 判断元素是否在画布顶部附近
+  const isNearTop = topLeft.y < topThreshold
+
+  // 如果元素在顶部，工具栏显示在下方（需要避开旋转按钮）；否则显示在上方
+  const topPosition = isNearTop
+    ? bottomRight.y + rotateHandleOffset + padding + 8 // 旋转按钮下方额外留8px间距
+    : topLeft.y - toolbarHeight - padding
 
   return {
     left: `${screenCenterX}px`,
-    top: `${topLeft.y - toolbarHeight - padding}px`,
+    top: `${topPosition}px`,
     transform: 'translateX(-50%)'
   }
 })
