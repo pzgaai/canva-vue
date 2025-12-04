@@ -353,17 +353,21 @@ export const useElementsStore = defineStore('elements', {
       ids: string[],
       updates: Partial<AnyElement> | ((element: AnyElement) => void)
     ): void {
-      ids.forEach(id => {
+      // === 只做轻量同步更新，绝不进行深克隆 ===
+      const now = Date.now()
+
+      for (const id of ids) {
         const element = this.elements.find(el => el.id === id)
-        if (element) {
-          if (typeof updates === 'function') {
-            updates(element)
-          } else {
-            Object.assign(element, updates)
-          }
-          element.updatedAt = Date.now()
+        if (!element) continue
+
+        if (typeof updates === 'function') {
+          updates(element)
+        } else {
+          Object.assign(element, updates)
         }
-      })
+
+        element.updatedAt = now
+      }
 
       // 创建新数组引用，触发 watch
       this.elements = [...this.elements]
