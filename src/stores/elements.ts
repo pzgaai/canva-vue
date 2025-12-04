@@ -7,6 +7,27 @@ import { useSelectionStore } from './selection'
 const storage = new LocalStorage('elements_')
 const STORAGE_KEY = 'list'
 const CLIPBOARD_KEY = 'clipboard'
+// === 全局节流句柄 ===
+let _saveTimer: number | null = null
+
+// === 异步 snapshot 任务队列 ===
+const _snapshotQueue: AnyElement[][] = []
+let _snapshotScheduled = false
+
+function scheduleSnapshot(snapshot: AnyElement[]) {
+  _snapshotQueue.push(snapshot)
+  if (_snapshotScheduled) return
+  _snapshotScheduled = true
+
+  queueMicrotask(() => {
+    const history = useHistoryStore()
+    for (const snap of _snapshotQueue) {
+      history.pushSnapshot(snap)
+    }
+    _snapshotQueue.length = 0
+    _snapshotScheduled = false
+  })
+}
 
 // 定义 clipboard 元素的类型（包含临时属性）
 interface ClipboardElement extends Omit<AnyElement, 'id' | 'createdAt' | 'updatedAt' | 'parentGroup'> {
@@ -33,8 +54,17 @@ export const useElementsStore = defineStore('elements', {
   actions: {
     /** 记录当前快照 */
     recordSnapshot() {
-      const history = useHistoryStore()
-      history.pushSnapshot(JSON.parse(JSON.stringify(this.elements)))
+      try {
+        let cloned: AnyElement[]
+        try {
+          cloned = structuredClone(this.elements)
+        } catch {
+          cloned = JSON.parse(JSON.stringify(this.elements))
+        }
+        scheduleSnapshot(cloned)
+      } catch (e) {
+        console.error("recordSnapshot failed:", e)
+      }
     },
 
     /** 初始化：从 LocalStorage 读取 */
@@ -56,7 +86,19 @@ export const useElementsStore = defineStore('elements', {
 
     /** 保存到 LocalStorage */
     saveToLocal() {
-      storage.set(STORAGE_KEY, this.elements)
+      if (_saveTimer) cancelAnimationFrame(_saveTimer)
+
+      _saveTimer = requestAnimationFrame(() => {
+        Promise.resolve().then(() => {
+          try {
+            // 若你使用 storage.set，请改成 storage.set(STORAGE_KEY, this.elements)
+            const json = JSON.stringify(this.elements)
+            localStorage.setItem(STORAGE_KEY, json)
+          } catch (err) {
+            console.error("saveToLocal failed:", err)
+          }
+        })
+      })
     },
     /** 生成唯一ID */
     generateId(): string {
