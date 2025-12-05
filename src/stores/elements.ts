@@ -22,10 +22,16 @@ interface ClipboardElement extends Omit<AnyElement, 'id' | 'createdAt' | 'update
   __parentGroupId?: string
 }
 
+// 定义 clipboard 的元数据（用于保存边界框信息）
+interface ClipboardMetadata {
+  boundingBox?: { x: number; y: number; width: number; height: number }
+}
+
 export const useElementsStore = defineStore('elements', {
   state: () => ({
     elements: [] as AnyElement[],
     clipboard: [] as ClipboardElement[],
+    clipboardMetadata: null as ClipboardMetadata | null,
   }),
 
   getters: {
@@ -71,6 +77,8 @@ export const useElementsStore = defineStore('elements', {
       this.elements = storage.get<AnyElement[]>(STORAGE_KEY, [])
       // 恢复 clipboard 数据
       this.clipboard = storage.get<ClipboardElement[]>(CLIPBOARD_KEY, [])
+      // 恢复 clipboard 元数据
+      this.clipboardMetadata = storage.get<ClipboardMetadata>(CLIPBOARD_KEY + '_metadata', null)
       // 将当前加载的状态作为初始快照推入历史，确保刷新后首次操作可被撤销
       try {
         const history = useHistoryStore()
@@ -448,8 +456,43 @@ export const useElementsStore = defineStore('elements', {
         return copy
       })
       
-      // 保存 clipboard 到 localStorage
+      // 计算所有顶层独立元素（非组合、非组合子元素）的边界框，用于保持相对位置
+      // 只计算独立元素，不包括组合元素（组合元素内部已经保持了相对位置）
+      const independentTopLevelElements = elementsToCopy.filter(({ element, isGroup }) => {
+        if (isGroup) return false // 排除组合元素
+        // 非组合元素：检查是否是组合的子元素
+        const typedElement = element as AnyElement
+        return !typedElement.parentGroup
+      })
+      
+      let boundingBox: { x: number; y: number; width: number; height: number } | undefined
+      if (independentTopLevelElements.length > 1) {
+        // 多个独立元素：计算边界框
+        let minX = Infinity
+        let minY = Infinity
+        let maxX = -Infinity
+        let maxY = -Infinity
+        
+        independentTopLevelElements.forEach(({ element }) => {
+          const el = element as AnyElement
+          minX = Math.min(minX, el.x)
+          minY = Math.min(minY, el.y)
+          maxX = Math.max(maxX, el.x + el.width)
+          maxY = Math.max(maxY, el.y + el.height)
+        })
+        
+        boundingBox = {
+          x: minX,
+          y: minY,
+          width: maxX - minX,
+          height: maxY - minY
+        }
+      }
+      
+      // 保存 clipboard 和 metadata 到 localStorage
+      this.clipboardMetadata = boundingBox ? { boundingBox } : null
       storage.set(CLIPBOARD_KEY, this.clipboard)
+      storage.set(CLIPBOARD_KEY + '_metadata', this.clipboardMetadata)
     },
 
     /** 粘贴元素 */
@@ -489,6 +532,24 @@ export const useElementsStore = defineStore('elements', {
       })
       
       // 第二步：先创建独立的非组合元素
+      // 如果有多个独立元素且有边界框，使用边界框保持相对位置
+      const hasMultipleIndependent = independentElements.length > 1
+      const boundingBox = this.clipboardMetadata?.boundingBox
+      const useRelativePosition = hasMultipleIndependent && boundingBox
+      
+      // 计算边界框的偏移量（如果有）
+      let boundingBoxOffsetX = 0
+      let boundingBoxOffsetY = 0
+      if (useRelativePosition && position) {
+        // 指定了位置：边界框移动到指定位置
+        boundingBoxOffsetX = position.x - boundingBox.x
+        boundingBoxOffsetY = position.y - boundingBox.y
+      } else if (useRelativePosition) {
+        // 未指定位置：整个边界框偏移 offset
+        boundingBoxOffsetX = offset
+        boundingBoxOffsetY = offset
+      }
+      
       independentElements.forEach(({ clipboardEl, originalId, index }) => {
         const id = this.generateId()
         idMapping.set(originalId, id)
@@ -497,10 +558,16 @@ export const useElementsStore = defineStore('elements', {
         let newX: number;
         let newY: number;
 
-        if (position) {
+        if (useRelativePosition) {
+          // 使用边界框保持相对位置
+          newX = clipboardEl.x + boundingBoxOffsetX
+          newY = clipboardEl.y + boundingBoxOffsetY
+        } else if (position) {
+          // 单个元素或没有边界框：使用索引偏移
           newX = position.x + offset * index;
           newY = position.y + offset * index;
         } else {
+          // 默认偏移
           newX = clipboardEl.x + offset * (index + 1);
           newY = clipboardEl.y + offset * (index + 1);
         }
