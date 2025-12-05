@@ -74,34 +74,6 @@ export class CoordinateTransform {
     }
 
     /**
-     * 批量转换：屏幕坐标转世界坐标
-     */
-    static screenPointsToWorld(
-        points: Point[],
-        viewport: ViewportState,
-        viewportWidth: number,
-        viewportHeight: number
-    ): Point[] {
-        return points.map(point =>
-            this.screenToWorld(point.x, point.y, viewport, viewportWidth, viewportHeight)
-        )
-    }
-
-    /**
-     * 批量转换：世界坐标转屏幕坐标
-     */
-    static worldPointsToScreen(
-        points: Point[],
-        viewport: ViewportState,
-        viewportWidth: number,
-        viewportHeight: number
-    ): Point[] {
-        return points.map(point =>
-            this.worldToScreen(point.x, point.y, viewport, viewportWidth, viewportHeight)
-        )
-    }
-
-    /**
      * 计算当前视口的可见区域（世界坐标）
      * @param viewport 视口状态
      * @param viewportWidth 视口宽度
@@ -185,22 +157,6 @@ export class CoordinateTransform {
     }
 
     /**
-     * 判断世界坐标中的点是否在可见区域内
-     */
-    static isPointVisible(
-        worldX: number,
-        worldY: number,
-        visibleBounds: VisibleBounds
-    ): boolean {
-        return (
-            worldX >= visibleBounds.left &&
-            worldX <= visibleBounds.right &&
-            worldY >= visibleBounds.top &&
-            worldY <= visibleBounds.bottom
-        )
-    }
-
-    /**
      * 计算缩放后的新视口位置（以指定点为中心缩放）
      * @param viewport 当前视口状态
      * @param newZoom 新的缩放级别
@@ -235,43 +191,5 @@ export class CoordinateTransform {
             x: worldPoint.x - centerOffsetX,
             y: worldPoint.y - centerOffsetY
         }
-    }
-
-    /**
-     * 限制视口在世界边界内
-     */
-    static clampToBounds(
-        viewport: ViewportState,
-        viewportWidth: number,
-        viewportHeight: number,
-        worldBounds: { x: number; y: number; width: number; height: number }
-    ): Point {
-        // 计算当前可见区域的尺寸（世界坐标）
-        const visibleWidth = viewportWidth / viewport.zoom
-        const visibleHeight = viewportHeight / viewport.zoom
-
-        // 限制相机位置
-        let clampedX = viewport.x
-        let clampedY = viewport.y
-
-        // 如果可见区域大于世界边界，居中显示
-        if (visibleWidth >= worldBounds.width) {
-            clampedX = worldBounds.x + worldBounds.width / 2
-        } else {
-            // 限制在边界内
-            const minX = worldBounds.x + visibleWidth / 2
-            const maxX = worldBounds.x + worldBounds.width - visibleWidth / 2
-            clampedX = Math.max(minX, Math.min(maxX, viewport.x))
-        }
-
-        if (visibleHeight >= worldBounds.height) {
-            clampedY = worldBounds.y + worldBounds.height / 2
-        } else {
-            const minY = worldBounds.y + visibleHeight / 2
-            const maxY = worldBounds.y + worldBounds.height - visibleHeight / 2
-            clampedY = Math.max(minY, Math.min(maxY, viewport.y))
-        }
-
-        return { x: clampedX, y: clampedY }
     }
 }

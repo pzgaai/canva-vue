@@ -38,14 +38,6 @@ export interface ViewportConfig {
   defaultZoom: number
   /** 缩放步长 */
   zoomStep: number
-  /** 是否启用边界限制 */
-  enableBounds: boolean
-  /** 世界边界（如果启用） */
-  worldBounds?: Rectangle
-  /** 是否启用惯性滚动 */
-  enableInertia: boolean
-  /** 惯性阻尼系数 */
-  inertiaDamping: number
 }
 
 /**

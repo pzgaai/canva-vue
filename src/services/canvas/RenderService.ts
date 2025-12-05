@@ -10,7 +10,7 @@
  */
 import { Application, Graphics, Container } from 'pixi.js'
 import type { AnyElement, ShapeElement } from '@/cores/types/element'
-import type { ViewportService } from './ViewportService'
+import type { ViewportService } from '@/services'
 
 export class RenderService {
   private app: Application | null = null
@@ -189,7 +189,7 @@ export class RenderService {
       // 创建新元素
       graphic = this.createGraphic(element)
     }
-    graphic.visible = element.visible !== false
+    graphic.visible = element.visible
   }
 
   /**
