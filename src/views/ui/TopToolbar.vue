@@ -298,10 +298,16 @@ const onUndo = () => {
   // 保存到本地
   elementsStore.saveToLocal()
 
-  // 自动重新选中被变更的元素
+  // 自动重新选中被变更的元素（只选择顶层元素，排除组合的子元素）
   selectionStore.clearSelection()
   if (changedIds?.length) {
-    changedIds.forEach(id => selectionStore.addToSelection(id))
+    changedIds.forEach(id => {
+      const el = elementsStore.getElementById(id)
+      // 只选中顶层元素（没有 parentGroup 的元素），排除掉组合中的子元素
+      if (el && !el.parentGroup) {
+        selectionStore.addToSelection(id)
+      }
+    })
   }
 }
 
@@ -314,10 +320,16 @@ const onRedo = () => {
   // 保存到本地
   elementsStore.saveToLocal()
 
-  // 自动重新选中被变更的元素
+  // 自动重新选中被变更的元素（只选择顶层元素，排除组合的子元素）
   selectionStore.clearSelection()
   if (changedIds?.length) {
-    changedIds.forEach(id => selectionStore.addToSelection(id))
+    changedIds.forEach(id => {
+      const el = elementsStore.getElementById(id)
+      // 只选中顶层元素（没有 parentGroup 的元素），排除掉组合中的子元素
+      if (el && !el.parentGroup) {
+        selectionStore.addToSelection(id)
+      }
+    })
   }
 }
 

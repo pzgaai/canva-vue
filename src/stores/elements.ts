@@ -8,6 +8,13 @@ import { performanceMonitor, MetricType } from '@/cores/monitoring'
 const storage = new LocalStorage('elements_')
 const STORAGE_KEY = 'list'
 const CLIPBOARD_KEY = 'clipboard'
+// === 全局节流句柄 ===
+let _saveTimer: number | null = null
+
+// === snapshot 节流 ===
+let _snapshotTimer: number | null = null
+let _pendingSnapshot: AnyElement[] | null = null
+
 
 // 定义 clipboard 元素的类型（包含临时属性）
 interface ClipboardElement extends Omit<AnyElement, 'id' | 'createdAt' | 'updatedAt' | 'parentGroup'> {
@@ -40,8 +47,30 @@ export const useElementsStore = defineStore('elements', {
   actions: {
     /** 记录当前快照 */
     recordSnapshot() {
-      const history = useHistoryStore()
-      history.pushSnapshot(JSON.parse(JSON.stringify(this.elements)))
+      // 总是记录最新状态，但不立即深克隆
+      _pendingSnapshot = this.elements.slice()  // 浅拷贝即可等待执行
+
+      // 已有定时器说明正在等待，不重复触发
+      if (_snapshotTimer !== null) return
+
+      _snapshotTimer = window.setTimeout(() => {
+        _snapshotTimer = null
+
+        if (!_pendingSnapshot) return
+        const finalElements = _pendingSnapshot
+        _pendingSnapshot = null
+
+        // 在定时触发时做深克隆（只做一次）
+        let cloned: AnyElement[]
+        try {
+          cloned = structuredClone(finalElements)
+        } catch {
+          cloned = JSON.parse(JSON.stringify(finalElements))
+        }
+
+        const history = useHistoryStore()
+        history.pushSnapshot(cloned)
+      }, 50)  // ← 延迟改成 30 也可以
     },
 
     /** 初始化：从 LocalStorage 读取 */
@@ -65,7 +94,20 @@ export const useElementsStore = defineStore('elements', {
 
     /** 保存到 LocalStorage */
     saveToLocal() {
-      storage.set(STORAGE_KEY, this.elements)
+      if (_saveTimer) cancelAnimationFrame(_saveTimer)
+
+      _saveTimer = requestAnimationFrame(() => {
+        Promise.resolve().then(() => {
+          try {
+            // 若你使用 storage.set，请改成 storage.set(STORAGE_KEY, this.elements)
+            // const json = JSON.stringify(this.elements)
+            // localStorage.setItem(STORAGE_KEY, json)
+            storage.set(STORAGE_KEY, this.elements)
+          } catch (err) {
+            console.error("saveToLocal failed:", err)
+          }
+        })
+      })
     },
     /** 生成唯一ID */
     generateId(): string {
@@ -328,17 +370,21 @@ export const useElementsStore = defineStore('elements', {
       ids: string[],
       updates: Partial<AnyElement> | ((element: AnyElement) => void)
     ): void {
-      ids.forEach(id => {
+      // === 只做轻量同步更新，绝不进行深克隆 ===
+      const now = Date.now()
+
+      for (const id of ids) {
         const element = this.elements.find(el => el.id === id)
-        if (element) {
-          if (typeof updates === 'function') {
-            updates(element)
-          } else {
-            Object.assign(element, updates)
-          }
-          element.updatedAt = Date.now()
+        if (!element) continue
+
+        if (typeof updates === 'function') {
+          updates(element)
+        } else {
+          Object.assign(element, updates)
         }
-      })
+
+        element.updatedAt = now
+      }
 
       // 创建新数组引用，触发 watch
       this.elements = [...this.elements]
