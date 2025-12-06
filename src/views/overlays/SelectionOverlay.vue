@@ -62,6 +62,7 @@ import { useResize } from '@/composables/useResize'
 import { CoordinateTransform } from '@/cores/viewport/CoordinateTransform'
 import type { CanvasService } from '@/services/canvas/CanvasService'
 import { useAlignment } from '@/composables/useAlignment'
+import { createBBoxGeometry } from '@/composables/useAlignmentHelpers'
 
 const selectionStore = useSelectionStore()
 const elementsStore = useElementsStore()
@@ -90,7 +91,7 @@ let animationFrameId: number | null = null
 const initialElementPositions = new Map<string, { x: number; y: number; width: number; height: number }>()
 
 // 使用 ref 缓存边界框，避免频繁计算
-const cachedBoundingBox = ref<{ x: number; y: number; width: number; height: number } | null>(null)
+const cachedBoundingBox = ref<{ x: number; y: number; width: number; height: number; rotation: number } | null>(null)
 
 /**
  * 将选中的元素ID展开：如果包含组合元素，则把其子元素一并返回
@@ -204,7 +205,10 @@ const calculateBoundingBox = () => {
     x: minX,
     y: minY,
     width: maxX - minX,
-    height: maxY - minY
+    height: maxY - minY,
+    rotation: selectedIds.value.length === 1 && selectedElements.length === 1 && selectedElements[0] && selectedElements[0].type !== 'group' 
+      ? (selectedElements[0].rotation || 0)
+      : 0  // 多选或组合时rotation为0
   }
 }
 
@@ -245,7 +249,8 @@ const worldBoundingBox = computed(() => {
           x: baseBox.x + dragState.offset.x,
           y: baseBox.y + dragState.offset.y,
           width: baseBox.width,
-          height: baseBox.height
+          height: baseBox.height,
+          rotation: 'rotation' in baseBox ? baseBox.rotation : 0
         }
       }
     }
@@ -348,14 +353,14 @@ const onDrag = (event: MouseEvent) => {
   let finalDy = worldDy
 
   if (cachedBoundingBox.value) {
-    const targetRect = {
+    const targetGeometry = createBBoxGeometry({
       x: cachedBoundingBox.value.x + worldDx,
       y: cachedBoundingBox.value.y + worldDy,
       width: cachedBoundingBox.value.width,
       height: cachedBoundingBox.value.height
-    }
+    }, cachedBoundingBox.value.rotation)
 
-    const { dx: snapDx, dy: snapDy } = checkAlignment(targetRect, selectedIds.value)
+    const { dx: snapDx, dy: snapDy } = checkAlignment(targetGeometry, selectedIds.value)
     finalDx += snapDx
     finalDy += snapDy
   }
