@@ -18,7 +18,8 @@ interface SnapCandidate {
 }
 
 export class AlignmentCalculator {
-  static readonly THRESHOLD = 5 // 吸附阈值 (像素)
+  // 基础吸附阈值（像素），会按缩放放大。略大一些以便多元素同时对齐时不必“贴脸”。
+  static readonly THRESHOLD_BASE = 8
 
   /**
    * 计算对齐吸附（支持旋转包围盒）
@@ -39,7 +40,8 @@ export class AlignmentCalculator {
     }
 
     // 调整阈值
-    const threshold = this.THRESHOLD / scale
+    // 缩放越大，逻辑阈值越小（保持视觉一致）
+    const threshold = this.THRESHOLD_BASE / Math.max(scale, 0.1)
 
     // 计算目标元素的旋转包围盒和吸附点
     const targetRBBox = computeGeometry(targetGeometry)
@@ -50,7 +52,7 @@ export class AlignmentCalculator {
     const nearbyElements = this.filterNearbyElements(
       referenceElements,
       targetAABB,
-      threshold * 10 // 使用较大的过滤范围
+      threshold * 20 + Math.max(targetAABB.width, targetAABB.height) * 0.75 // 视口缩放 + 尺寸自适应
     )
 
     // 收集所有参考元素的吸附点
