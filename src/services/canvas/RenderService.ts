@@ -11,6 +11,7 @@
 import { Application, Graphics, Container } from 'pixi.js'
 import type { AnyElement, ShapeElement } from '@/cores/types/element'
 import type { ViewportService } from '@/services'
+import { performanceMonitor, MetricType } from '@/cores/monitoring'
 
 export class RenderService {
   private app: Application | null = null
@@ -129,6 +130,8 @@ export class RenderService {
   private renderElementsImmediate(elements: AnyElement[]): void {
     if (!this.app) return
 
+    performanceMonitor.startTimer('render-elements')
+
     const currentElementIds = new Set(elements.map(el => el.id))
     // 删除不再存在的元素
     this.graphicMap.forEach((graphic, id) => {
@@ -150,7 +153,13 @@ export class RenderService {
       }
     })
 
-    //console.timeEnd('render-100-canvas')
+    performanceMonitor.endTimer('render-elements', MetricType.RENDER, {
+      elementCount: elements.length,
+      dirtyCount: elements.filter(el => {
+        const snapshot = this.createElementSnapshot(el)
+        return snapshot !== this.elementSnapshots.get(el.id)
+      }).length
+    })
   }
 
   /**
