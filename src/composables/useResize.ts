@@ -110,12 +110,6 @@ export function useResize(canvasService: CanvasService | null | undefined) {
     const centerX = cachedBoundingBox.x + cachedBoundingBox.width / 2
     const centerY = cachedBoundingBox.y + cachedBoundingBox.height / 2
 
-    // // Check if any selected element is a group
-    // const hasGroup = selectedIds.some(id => {
-    //   const el = elementsStore.getElementById(id)
-    //   return el?.type === 'group'
-    // })
-
     // Expand groups: selected groups and their children participate in scaling
     const targetIds = new Set<string>()
     const groupIds = new Set<string>()
@@ -138,7 +132,7 @@ export function useResize(canvasService: CanvasService | null | undefined) {
 
     elementsStore.updateElements(allTargetIds, (el) => {
       // Skip updating group elements themselves
-      if (el.type === 'group') return
+      // if (el.type === 'group') return
 
       const isCircle = el.type === 'shape' && 'shapeType' in el && el.shapeType === 'circle'
 
@@ -193,10 +187,12 @@ export function useResize(canvasService: CanvasService | null | undefined) {
       el.height = newHeight
     })
 
-    // 更新组合元素的边界框
+    // 更新组合元素的边界框，保持旋转
     groupIds.forEach(groupId => {
       const group = elementsStore.getElementById(groupId)
       if (!group || group.type !== 'group') return
+
+      const groupRotation = group.rotation || 0
 
       // 重新计算组合的边界框
       const children = group.children
@@ -208,12 +204,13 @@ export function useResize(canvasService: CanvasService | null | undefined) {
       const bbox = calculateBoundingBox(children)
       if (!bbox) return
 
-      // 更新组合元素的位置和尺寸
+      // 更新组合元素的位置和尺寸，保持旋转
       elementsStore.updateElements([groupId], (el) => {
         el.x = bbox.x
         el.y = bbox.y
         el.width = bbox.width
         el.height = bbox.height
+        el.rotation = groupRotation
       })
     })
   }
@@ -258,9 +255,9 @@ export function useResize(canvasService: CanvasService | null | undefined) {
       return el?.type === 'group'
     })
 
-    // Get rotation for single non-group elements
+    // Get rotation for single elements (including groups)
     let rotation = 0
-    if (selectedIds.length === 1 && selectedIds[0] && !isGroup) {
+    if (selectedIds.length === 1 && selectedIds[0]) {
       const el = elementsStore.getElementById(selectedIds[0])
       rotation = el?.rotation || 0
     }
@@ -294,9 +291,8 @@ export function useResize(canvasService: CanvasService | null | undefined) {
     const screenWidth = w * viewport.zoom
     const screenHeight = h * viewport.zoom
 
-    // Apply rotation for single non-group elements
-    const rotationDeg = (rotation * 180) / Math.PI
-    box.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0) rotate(${rotationDeg}deg)`
+    // Apply rotation for single elements (including groups)
+    box.style.transform = `translate3d(${screenPos.x}px, ${screenPos.y}px, 0) rotate(${rotation}rad)`
     box.style.transformOrigin = `${screenWidth / 2}px ${screenHeight / 2}px`
     box.style.width = screenWidth + 'px'
     box.style.height = screenHeight + 'px'
