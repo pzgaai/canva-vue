@@ -722,7 +722,7 @@ const stopResize = () => {
   const scaleY = worldHeight / cachedBoundingBox.value.height
 
   if (Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01) {
-    // console.log(selectedIds.value, '应用缩放到 Store:', scaleX, scaleY)
+    // //console.log(selectedIds.value, '应用缩放到 Store:', scaleX, scaleY)
     applyResizeToStore(selectedIds.value, cachedBoundingBox.value, scaleX, scaleY, resizeHandle.value, initialElementPositions)
     elementsStore.saveToLocal()
     cachedBoundingBox.value = calculateBoundingBox()
